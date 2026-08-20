@@ -7,9 +7,24 @@ INSTALL_DIR="/usr/local/libexec"
 BINARY_PATH="${INSTALL_DIR}/mac-sleep-monitor"
 PLIST_PATH="/Library/LaunchDaemons/${LABEL}.plist"
 
-START_HOUR="${1:-5}"
-START_MINUTE="${2:-0}"
-END_TIME="${3:-08:00}"
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<'EOF'
+用法：
+  sudo ./scripts/install-daily-monitor.sh [开始时间] [结束时间] [数据目录]
+
+示例：
+  sudo ./scripts/install-daily-monitor.sh 05:00 08:00
+  sudo ./scripts/install-daily-monitor.sh 3:30 7:50
+  sudo ./scripts/install-daily-monitor.sh 23:30 02:00 "$HOME/MacSleepMonitorData"
+
+定时任务固定每 5 秒采样一次；五分钟测试脚本仍每 1 秒采样一次。
+结束时间早于开始时间时，按次日结束处理。
+EOF
+  exit 0
+fi
+
+START_TIME="${1:-05:00}"
+END_TIME="${2:-08:00}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "请使用 sudo 运行此脚本。"
@@ -19,7 +34,7 @@ fi
 REAL_USER="${SUDO_USER:-root}"
 REAL_HOME="$(dscl . -read "/Users/${REAL_USER}" NFSHomeDirectory | awk '{print $2}')"
 REAL_GROUP="$(id -gn "${REAL_USER}")"
-OUTPUT_ROOT="${4:-${REAL_HOME}/MacSleepMonitorData}"
+OUTPUT_ROOT="${3:-${REAL_HOME}/MacSleepMonitorData}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_BINARY="${PROJECT_DIR}/.build/release/mac-sleep-monitor"
@@ -32,18 +47,29 @@ xml_escape() {
   printf '%s' "${value}"
 }
 
-if [[ ! "${START_HOUR}" =~ ^([0-9]|1[0-9]|2[0-3])$ ]]; then
-  echo "开始小时无效：${START_HOUR}"
+TIME_PATTERN='^([01]?[0-9]|2[0-3]):[0-5][0-9]$'
+
+if [[ ! "${START_TIME}" =~ ${TIME_PATTERN} ]]; then
+  echo "开始时间无效：${START_TIME}，请使用 HH:MM，例如 03:30"
   exit 1
 fi
 
-if [[ ! "${START_MINUTE}" =~ ^([0-9]|[1-5][0-9])$ ]]; then
-  echo "开始分钟无效：${START_MINUTE}"
+if [[ ! "${END_TIME}" =~ ${TIME_PATTERN} ]]; then
+  echo "结束时间无效：${END_TIME}，请使用 HH:MM，例如 07:50"
   exit 1
 fi
 
-if [[ ! "${END_TIME}" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
-  echo "结束时间无效：${END_TIME}"
+IFS=':' read -r START_HOUR START_MINUTE <<< "${START_TIME}"
+IFS=':' read -r END_HOUR END_MINUTE <<< "${END_TIME}"
+START_HOUR="$((10#${START_HOUR}))"
+START_MINUTE="$((10#${START_MINUTE}))"
+END_HOUR="$((10#${END_HOUR}))"
+END_MINUTE="$((10#${END_MINUTE}))"
+START_TIME_NORMALIZED="$(printf '%02d:%02d' "${START_HOUR}" "${START_MINUTE}")"
+END_TIME_NORMALIZED="$(printf '%02d:%02d' "${END_HOUR}" "${END_MINUTE}")"
+
+if [[ "${START_TIME_NORMALIZED}" == "${END_TIME_NORMALIZED}" ]]; then
+  echo "开始时间和结束时间不能相同。"
   exit 1
 fi
 
@@ -69,12 +95,14 @@ cat > "${PLIST_PATH}" <<EOF
   <array>
     <string>${BINARY_PATH}</string>
     <string>scheduled-run</string>
+    <string>--start</string>
+    <string>${START_TIME_NORMALIZED}</string>
     <string>--end</string>
-    <string>${END_TIME}</string>
+    <string>${END_TIME_NORMALIZED}</string>
     <string>--output-root</string>
     <string>${OUTPUT_ROOT_XML}</string>
     <string>--interval</string>
-    <string>2</string>
+    <string>5</string>
     <string>--top</string>
     <string>10</string>
     <string>--bucket</string>
@@ -108,6 +136,7 @@ plutil -lint "${PLIST_PATH}"
 launchctl bootstrap system "${PLIST_PATH}"
 
 echo "定时监控已安装。"
-echo "采集时间：每天 $(printf '%02d:%02d' "${START_HOUR}" "${START_MINUTE}") 到 ${END_TIME}"
+echo "采集时间：每天 ${START_TIME_NORMALIZED} 到 ${END_TIME_NORMALIZED}"
+echo "采样间隔：5 秒"
 echo "报告目录：${OUTPUT_ROOT}/YYYY-MM-DD/report.html"
 echo "任务状态：sudo launchctl print system/${LABEL}"

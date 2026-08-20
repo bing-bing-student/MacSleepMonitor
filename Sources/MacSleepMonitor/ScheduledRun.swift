@@ -1,6 +1,8 @@
 import Foundation
 
 struct ScheduledRunConfiguration {
+    let startHour: Int
+    let startMinute: Int
     let endHour: Int
     let endMinute: Int
     let outputRootURL: URL
@@ -10,15 +12,15 @@ struct ScheduledRunConfiguration {
 }
 
 enum ScheduledRunError: Error, CustomStringConvertible {
-    case invalidEndTime
-    case endTimeAlreadyPassed
+    case invalidTimeRange
+    case outsideTimeWindow
 
     var description: String {
         switch self {
-        case .invalidEndTime:
-            "定时任务结束时间无效"
-        case .endTimeAlreadyPassed:
-            "今天的采集结束时间已经过去，本次任务跳过"
+        case .invalidTimeRange:
+            "定时任务时间范围无效"
+        case .outsideTimeWindow:
+            "当前时间不在配置的采集时段内，本次任务跳过"
         }
     }
 }
@@ -27,18 +29,55 @@ enum ScheduledRun {
     static func execute(configuration: ScheduledRunConfiguration) throws {
         let now = Date()
         let calendar = Calendar.current
-        guard let end = calendar.date(
-            bySettingHour: configuration.endHour,
-            minute: configuration.endMinute,
-            second: 0,
-            of: now
-        ) else {
-            throw ScheduledRunError.invalidEndTime
+        guard let startToday = calendar.date(
+                bySettingHour: configuration.startHour,
+                minute: configuration.startMinute,
+                second: 0,
+                of: now
+              ),
+              let endToday = calendar.date(
+                bySettingHour: configuration.endHour,
+                minute: configuration.endMinute,
+                second: 0,
+                of: now
+              ) else {
+            throw ScheduledRunError.invalidTimeRange
         }
 
-        let remaining = end.timeIntervalSince(now)
+        let startMinutes = configuration.startHour * 60 + configuration.startMinute
+        let endMinutes = configuration.endHour * 60 + configuration.endMinute
+        guard startMinutes != endMinutes else {
+            throw ScheduledRunError.invalidTimeRange
+        }
+
+        let currentComponents = calendar.dateComponents([.hour, .minute], from: now)
+        let currentMinutes = (currentComponents.hour ?? 0) * 60 +
+            (currentComponents.minute ?? 0)
+        let crossesMidnight = endMinutes < startMinutes
+        let window: (start: Date, end: Date)?
+
+        if !crossesMidnight {
+            window = now >= startToday && now < endToday
+                ? (startToday, endToday)
+                : nil
+        } else if currentMinutes >= startMinutes {
+            window = calendar.date(byAdding: .day, value: 1, to: endToday)
+                .map { (startToday, $0) }
+        } else if currentMinutes < endMinutes {
+            window = calendar.date(byAdding: .day, value: -1, to: startToday)
+                .map { ($0, endToday) }
+        } else {
+            window = nil
+        }
+
+        guard let window else {
+            print(ScheduledRunError.outsideTimeWindow.description)
+            return
+        }
+
+        let remaining = window.end.timeIntervalSince(now)
         guard remaining > 1 else {
-            print(ScheduledRunError.endTimeAlreadyPassed.description)
+            print(ScheduledRunError.outsideTimeWindow.description)
             return
         }
 
@@ -46,7 +85,10 @@ enum ScheduledRun {
         dayFormatter.locale = Locale(identifier: "en_US_POSIX")
         dayFormatter.dateFormat = "yyyy-MM-dd"
         let runDirectory = configuration.outputRootURL
-            .appendingPathComponent(dayFormatter.string(from: now), isDirectory: true)
+            .appendingPathComponent(
+                dayFormatter.string(from: window.start),
+                isDirectory: true
+            )
         try FileManager.default.createDirectory(
             at: runDirectory,
             withIntermediateDirectories: true
@@ -69,7 +111,7 @@ enum ScheduledRun {
         )
 
         print("定时采集目录：\(runDirectory.path)")
-        print("计划结束时间：\(end)")
+        print("计划结束时间：\(window.end)")
         let runner = try MonitorRunner(configuration: monitorConfiguration)
         try runner.run()
 

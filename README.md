@@ -5,7 +5,7 @@
 1. 使用 macOS 自带的 `launchd` 每天在指定时间启动。
 2. 在指定结束时间停止采集并自动生成 HTML 统计图表。
 
-默认安装配置是每天 `05:00–08:00`，以 2 秒间隔采集，数据保存到当前用户主目录的 `MacSleepMonitorData`。五分钟手动测试使用 1 秒间隔。
+默认安装配置是每天 `05:00–08:00`，以 5 秒间隔采集，数据保存到当前用户主目录的 `MacSleepMonitorData`。五分钟手动测试使用 1 秒间隔。
 
 迁移到另一台 Mac、五分钟测试和定时任务的完整步骤见
 [`MIGRATION-SOP.md`](MIGRATION-SOP.md)。
@@ -37,7 +37,7 @@ $ ./scripts/run-5-minute-test.sh
 确认报告正常后，安装每天 `05:00–08:00` 的定时任务：
 
 ```bash
-$ sudo ./scripts/install-daily-monitor.sh 5 0 08:00 "$HOME/MacSleepMonitorData"
+$ sudo ./scripts/install-daily-monitor.sh 05:00 08:00 "$HOME/MacSleepMonitorData"
 ```
 
 ## 当前能力
@@ -123,22 +123,46 @@ MacSleepMonitorData/
 安装脚本参数依次是：
 
 ```text
-开始小时 开始分钟 结束时间 数据目录
+开始时间 结束时间 数据目录
 ```
 
 例如每天凌晨 `04:30–07:30`：
 
 ```bash
-$ sudo ./scripts/install-daily-monitor.sh 4 30 07:30
+$ sudo ./scripts/install-daily-monitor.sh 04:30 07:30
 ```
 
 例如每天 `05:00–08:00`，同时指定其他数据目录：
 
 ```bash
-$ sudo ./scripts/install-daily-monitor.sh 5 0 08:00 "/Users/你的用户名/Documents/MacMonitorData"
+$ sudo ./scripts/install-daily-monitor.sh 05:00 08:00 "/Users/你的用户名/Documents/MacMonitorData"
 ```
 
 重复运行安装命令会更新原来的定时任务，不会创建重复任务。
+
+整体提前一小时：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 04:00 07:00
+```
+
+结束时间延长两小时：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 05:00 10:00
+```
+
+精确到分钟：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 03:30 07:50
+```
+
+跨午夜时，结束时间自动解释为次日。例如：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 23:30 02:00
+```
 
 ## 检查任务状态
 

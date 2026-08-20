@@ -148,10 +148,10 @@ $ ./scripts/run-5-minute-test.sh
 
 ## 安装每天定时任务
 
-默认时间是每天 `05:00–08:00`，定时任务使用 2 秒采样间隔，以降低长时间运行的 CPU 和磁盘开销；五分钟手动测试仍使用 1 秒间隔。执行：
+默认时间是每天 `05:00–08:00`，定时任务使用 5 秒采样间隔，以降低长时间运行的 CPU 和磁盘开销；五分钟手动测试仍使用 1 秒间隔。执行：
 
 ```bash
-$ sudo ./scripts/install-daily-monitor.sh 5 0 08:00 "$HOME/MacSleepMonitorData"
+$ sudo ./scripts/install-daily-monitor.sh 05:00 08:00 "$HOME/MacSleepMonitorData"
 ```
 
 安装脚本会：
@@ -162,6 +162,30 @@ $ sudo ./scripts/install-daily-monitor.sh 5 0 08:00 "$HOME/MacSleepMonitorData"
 - 把输出目录设置为当前登录用户可访问
 
 安装后，项目文件夹可以移动，但建议保留，以便后续更新和卸载。
+
+开始和结束时间都使用 `HH:MM`，也接受一位数小时。例如：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 3:30 7:50
+```
+
+重复执行安装命令会直接更新原任务。整体提前一小时：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 04:00 07:00
+```
+
+结束时间延长两小时：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 05:00 10:00
+```
+
+结束时间早于开始时间时，自动按次日处理：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 23:30 02:00
+```
 
 ## 验证定时配置
 
@@ -276,7 +300,7 @@ $ swift build -c release
 ```
 
 ```bash
-$ sudo ./scripts/install-daily-monitor.sh 5 0 08:00 "$HOME/MacSleepMonitorData"
+$ sudo ./scripts/install-daily-monitor.sh 05:00 08:00 "$HOME/MacSleepMonitorData"
 ```
 
 重复安装会替换旧二进制并更新原定时任务，不会创建重复任务，也不会删除历史数据。

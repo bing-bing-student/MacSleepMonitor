@@ -148,9 +148,10 @@ struct ReportOptions {
 }
 
 struct DailyRunOptions {
+    var startTime = "05:00"
     var endTime = "08:00"
     var outputRootPath = "~/MacSleepMonitorData"
-    var interval = 1.0
+    var interval = 5.0
     var topCount = 10
     var bucketSeconds = 30
 
@@ -167,6 +168,8 @@ struct DailyRunOptions {
                 return arguments[index]
             }
             switch argument {
+            case "--start":
+                options.startTime = try value()
             case "--end":
                 options.endTime = try value()
             case "--output-root":
@@ -198,17 +201,37 @@ struct DailyRunOptions {
     }
 
     func configuration(currentDirectory: URL) throws -> ScheduledRunConfiguration {
-        let parts = endTime.split(separator: ":")
-        guard parts.count == 2,
-              let hour = Int(parts[0]),
-              let minute = Int(parts[1]),
-              (0...23).contains(hour),
-              (0...59).contains(minute) else {
-            throw CommandLineError.invalidValue(option: "--end", value: endTime)
+        func parseTime(_ value: String, option: String) throws -> (Int, Int) {
+            let parts = value.split(separator: ":")
+            guard parts.count == 2,
+                  let hour = Int(parts[0]),
+                  let minute = Int(parts[1]),
+                  (0...23).contains(hour),
+                  (0...59).contains(minute) else {
+                throw CommandLineError.invalidValue(option: option, value: value)
+            }
+            return (hour, minute)
+        }
+
+        let (startHour, startMinute) = try parseTime(
+            startTime,
+            option: "--start"
+        )
+        let (endHour, endMinute) = try parseTime(
+            endTime,
+            option: "--end"
+        )
+        guard startHour != endHour || startMinute != endMinute else {
+            throw CommandLineError.invalidValue(
+                option: "--start/--end",
+                value: "\(startTime) \(endTime)"
+            )
         }
         return ScheduledRunConfiguration(
-            endHour: hour,
-            endMinute: minute,
+            startHour: startHour,
+            startMinute: startMinute,
+            endHour: endHour,
+            endMinute: endMinute,
             outputRootURL: PathResolver.resolve(
                 outputRootPath,
                 relativeTo: currentDirectory
@@ -244,7 +267,8 @@ MacSleepMonitor：macOS 进程资源采集器 MVP
   --bucket <秒>            图表聚合粒度，默认 30 秒
 
 定时运行选项：
-  --end <HH:MM>            当天停止采集的时间
+  --start <HH:MM>          开始采集时间
+  --end <HH:MM>            停止采集时间；早于开始表示次日
   --output-root <路径>     每日数据根目录
   --interval <秒>          采样间隔
   --top <数量>             每项指标 Top N
