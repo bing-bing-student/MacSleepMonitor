@@ -172,6 +172,12 @@ $ sudo ./scripts/install-daily-monitor.sh 23:30 02:00
 $ sudo launchctl print system/com.local.macsleepmonitor.daily
 ```
 
+确认已安装任务的启动参数，其中 `--interval` 后应为 `5`：
+
+```bash
+$ sudo plutil -p /Library/LaunchDaemons/com.local.macsleepmonitor.daily.plist
+```
+
 查看运行日志：
 
 ```bash
@@ -183,6 +189,8 @@ $ tail -n 100 ~/MacSleepMonitorData/launchd.stdout.log
 ```bash
 $ tail -n 100 ~/MacSleepMonitorData/launchd.stderr.log
 ```
+
+5 秒定时采样允许正常的系统调度抖动，只有普通采样线程延迟超过 15 秒才记录为缺口；真实睡眠或挂起通过墙上时间与单调时钟的差值独立判断。
 
 ## 手动采集
 

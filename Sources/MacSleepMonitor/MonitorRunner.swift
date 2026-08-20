@@ -75,7 +75,7 @@ final class MonitorRunner: @unchecked Sendable {
                     timestamp: now,
                     kind: .samplingGap,
                     durationSeconds: monotonicInterval,
-                    details: "采样线程暂停，可能发生系统睡眠或调度阻塞；已重置累计计数基线"
+                    details: "采样线程出现长时间调度延迟；已重置累计计数基线"
                 )
                 try write(event: event)
                 sampler.resetBaseline()
@@ -163,8 +163,8 @@ final class MonitorRunner: @unchecked Sendable {
 
     private func isSamplingGap(_ interval: Double) -> Bool {
         let threshold = max(
-            configuration.sampleIntervalSeconds * 2.5,
-            configuration.sampleIntervalSeconds + 2
+            configuration.sampleIntervalSeconds * 3,
+            configuration.sampleIntervalSeconds + 5
         )
         return interval > threshold
     }
