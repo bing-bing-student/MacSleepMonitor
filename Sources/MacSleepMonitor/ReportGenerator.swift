@@ -159,7 +159,7 @@ final class ReportGenerator {
             throw ReportGeneratorError.noSamples
         }
 
-        let selectedKeys = selectProcessKeys(stats)
+        let selectedKeys = Set(stats.map(\.key))
         let summary = try loadSummary()
         let series = try loadSeries(selectedKeys: selectedKeys)
         let events = try loadEvents()
@@ -248,25 +248,6 @@ final class ReportGenerator {
             )
         }
         return rows
-    }
-
-    private func selectProcessKeys(_ stats: [ReportProcessStats]) -> Set<String> {
-        var keys = Set<String>()
-        let metrics: [(ReportProcessStats) -> Double] = [
-            \.maxCPU,
-            \.maxMemory,
-            \.maxDiskRead,
-            \.maxDiskWrite,
-            \.maxNetworkReceive,
-            \.maxNetworkSend,
-            \.maxOpenFiles
-        ]
-        for metric in metrics {
-            stats.sorted { metric($0) > metric($1) }
-                .prefix(5)
-                .forEach { keys.insert($0.key) }
-        }
-        return keys
     }
 
     private func loadSummary() throws -> (
@@ -511,7 +492,8 @@ final class ReportGenerator {
         .tooltip-row i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 7px; }
         .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0 18px 18px; }
         .legend button { border-radius: 0; padding: 4px 0; }
-        .legend button.off { opacity: .35; text-decoration: line-through; }
+        .legend button.muted { opacity: .28; }
+        .legend button.solo { color: var(--text); border-bottom-color: var(--accent); }
         .legend i { width: 9px; height: 9px; display: inline-block; margin-right: 7px; }
         .table-panel { margin-top: 12px; overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; min-width: 1040px; }
@@ -558,7 +540,7 @@ final class ReportGenerator {
               <canvas id="chart"></canvas>
               <div class="tooltip" id="tooltip"></div>
             </div>
-            <div class="interaction-help">左键拖选放大 · 滚轮缩放 · Shift + 拖动平移 · 双击重置</div>
+            <div class="interaction-help">左键拖选放大 · 滚轮缩放 · Shift + 拖动平移 · 双击重置 · 点击进程名称独显</div>
             <div class="legend" id="legend"></div>
           </section>
           <section class="panel table-panel">
@@ -582,11 +564,10 @@ final class ReportGenerator {
           networkSend: { label: "网络发送", unit: "MiB/s", field: "networkSend", stat: "maxNetworkSend", format: v => (v / 1048576).toFixed(2) + " MiB/s" },
           openFiles: { label: "打开文件", unit: "个", field: "openFiles", stat: "maxOpenFiles", format: v => Math.round(v) + " 个" }
         };
-        const colors = ["#66d4c2","#e8c56a","#7fa6ff","#e9897e","#b39ddb"];
         const state = {
           metric: "cpu",
-          hidden: new Set(),
           visible: [],
+          isolatedKey: null,
           viewStart: data.startTime,
           viewEnd: data.endTime,
           drag: null
@@ -626,13 +607,27 @@ final class ReportGenerator {
 
         function topKeys(metricKey) {
           const metric = metrics[metricKey];
-          return [...data.stats].sort((a,b) => b[metric.stat] - a[metric.stat]).slice(0,5).map(row => row.key);
+          return [...data.stats]
+            .sort((a,b) => b[metric.stat] - a[metric.stat])
+            .map(row => row.key);
+        }
+
+        function colorFor(key) {
+          let hash = 2166136261;
+          for (let index=0; index<key.length; index++) {
+            hash ^= key.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+          }
+          const hue = Math.abs(hash) % 360;
+          return `hsl(${hue} 68% 68%)`;
         }
 
         function setMetric(metricKey) {
           state.metric = metricKey;
-          state.hidden.clear();
           state.visible = topKeys(metricKey);
+          if (state.isolatedKey && !state.visible.includes(state.isolatedKey)) {
+            state.isolatedKey = null;
+          }
           document.querySelectorAll("#tabs button").forEach(button => button.classList.toggle("active", button.dataset.metric === metricKey));
           document.querySelector("#unit").textContent = metrics[metricKey].unit;
           buildLegend();
@@ -643,14 +638,16 @@ final class ReportGenerator {
         function buildLegend() {
           const legend = document.querySelector("#legend");
           legend.innerHTML = "";
-          state.visible.forEach((key, index) => {
+          state.visible.forEach(key => {
             const series = data.series.find(item => item.key === key);
             if (!series) return;
             const button = document.createElement("button");
-            button.innerHTML = `<i style="background:${colors[index]}"></i>${series.name}`;
+            button.innerHTML = `<i style="background:${colorFor(key)}"></i>${series.name}`;
+            button.classList.toggle("solo", state.isolatedKey === key);
+            button.classList.toggle("muted", state.isolatedKey !== null && state.isolatedKey !== key);
             button.addEventListener("click", () => {
-              state.hidden.has(key) ? state.hidden.delete(key) : state.hidden.add(key);
-              button.classList.toggle("off", state.hidden.has(key));
+              state.isolatedKey = state.isolatedKey === key ? null : key;
+              buildLegend();
               draw();
             });
             legend.appendChild(button);
@@ -735,7 +732,7 @@ final class ReportGenerator {
           const plot = plotBounds();
           const metric = metrics[state.metric];
           const shown = state.visible
-            .filter(key => !state.hidden.has(key))
+            .filter(key => state.isolatedKey === null || key === state.isolatedKey)
             .map(key => data.series.find(item => item.key === key))
             .filter(Boolean);
           const values = shown.flatMap(series => series.points
@@ -774,8 +771,9 @@ final class ReportGenerator {
             ctx.fillStyle = "rgba(145,163,173,.12)";
             ctx.fillRect(x(start), plot.top, x(end)-x(start), plot.bottom-plot.top);
           });
-          shown.forEach((series,index) => {
-            ctx.strokeStyle = colors[state.visible.indexOf(series.key) % colors.length];
+          shown.forEach(series => {
+            const seriesColor = colorFor(series.key);
+            ctx.strokeStyle = seriesColor;
             ctx.lineWidth = 2;
             ctx.beginPath();
             let previous = null;
@@ -788,7 +786,7 @@ final class ReportGenerator {
               previous = point;
             });
             ctx.stroke();
-            ctx.fillStyle = colors[state.visible.indexOf(series.key) % colors.length];
+            ctx.fillStyle = seriesColor;
             series.points.forEach(point => {
               const value = point[metric.field];
               if (value == null || !Number.isFinite(value)) return;
@@ -869,13 +867,15 @@ final class ReportGenerator {
             (state.viewEnd-state.viewStart);
           const metric = metrics[state.metric];
           const rows = [];
-          state.visible.filter(key => !state.hidden.has(key)).forEach((key,index) => {
+          state.visible
+            .filter(key => state.isolatedKey === null || key === state.isolatedKey)
+            .forEach(key => {
             const series = data.series.find(item => item.key === key);
             if (!series?.points.length) return;
             const point = series.points.reduce((best,current) => Math.abs(current.timestamp-timestamp) < Math.abs(best.timestamp-timestamp) ? current : best);
             const value = point[metric.field];
             if (value == null || Math.abs(point.timestamp-timestamp) > data.bucketSeconds*2.5) return;
-            rows.push({ name: series.name, value, color: colors[index], timestamp: point.timestamp });
+            rows.push({ name: series.name, value, color: colorFor(key), timestamp: point.timestamp });
           });
           if (!rows.length) { tooltip.style.display = "none"; return; }
           tooltip.innerHTML = `<time>${fmtTime(rows[0].timestamp)}</time>` + rows.map(row => `<div class="tooltip-row"><span><i style="background:${row.color}"></i>${escapeHTML(row.name)}</span><b>${metric.format(row.value)}</b></div>`).join("");
