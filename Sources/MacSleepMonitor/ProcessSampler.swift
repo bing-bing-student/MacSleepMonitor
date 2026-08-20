@@ -4,6 +4,21 @@ import Foundation
 final class ProcessSampler {
     private var previousCounters: [String: ProcessCounters] = [:]
     private let networkSampler = NetworkSampler(intervalSeconds: 5)
+    private let timebaseNumerator: UInt64
+    private let timebaseDenominator: UInt64
+
+    init() {
+        var timebase = mach_timebase_info_data_t()
+        if mach_timebase_info(&timebase) == KERN_SUCCESS,
+           timebase.numer > 0,
+           timebase.denom > 0 {
+            timebaseNumerator = UInt64(timebase.numer)
+            timebaseDenominator = UInt64(timebase.denom)
+        } else {
+            timebaseNumerator = 1
+            timebaseDenominator = 1
+        }
+    }
 
     func resetBaseline() {
         previousCounters.removeAll(keepingCapacity: true)
@@ -124,8 +139,8 @@ final class ProcessSampler {
 
         return ProcessCounters(
             identity: identity,
-            userTimeNanoseconds: usage.ri_user_time,
-            systemTimeNanoseconds: usage.ri_system_time,
+            userTimeNanoseconds: ticksToNanoseconds(usage.ri_user_time),
+            systemTimeNanoseconds: ticksToNanoseconds(usage.ri_system_time),
             residentBytes: usage.ri_resident_size,
             physicalFootprintBytes: usage.ri_phys_footprint,
             diskReadBytes: usage.ri_diskio_bytesread,
@@ -186,5 +201,12 @@ final class ProcessSampler {
 
     private func saturatingDelta(_ current: UInt64, _ previous: UInt64) -> UInt64 {
         current >= previous ? current - previous : 0
+    }
+
+    private func ticksToNanoseconds(_ ticks: UInt64) -> UInt64 {
+        let whole = ticks / timebaseDenominator
+        let remainder = ticks % timebaseDenominator
+        return whole &* timebaseNumerator +
+            remainder &* timebaseNumerator / timebaseDenominator
     }
 }
