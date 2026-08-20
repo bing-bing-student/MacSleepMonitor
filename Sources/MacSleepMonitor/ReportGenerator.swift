@@ -572,6 +572,7 @@ final class ReportGenerator {
           viewEnd: data.endTime,
           drag: null
         };
+        const statsByKey = new Map(data.stats.map(row => [row.key, row]));
         const canvas = document.querySelector("#chart");
         const ctx = canvas.getContext("2d");
         const tooltip = document.querySelector("#tooltip");
@@ -622,6 +623,11 @@ final class ReportGenerator {
           return `hsl(${hue} 68% 68%)`;
         }
 
+        function processLabel(key, name) {
+          const pid = key.split(":")[0];
+          return `${name} · PID ${pid}`;
+        }
+
         function setMetric(metricKey) {
           state.metric = metricKey;
           state.visible = topKeys(metricKey);
@@ -642,7 +648,8 @@ final class ReportGenerator {
             const series = data.series.find(item => item.key === key);
             if (!series) return;
             const button = document.createElement("button");
-            button.innerHTML = `<i style="background:${colorFor(key)}"></i>${series.name}`;
+            button.innerHTML = `<i style="background:${colorFor(key)}"></i>${escapeHTML(processLabel(key,series.name))}`;
+            button.title = statsByKey.get(key)?.path || processLabel(key, series.name);
             button.classList.toggle("solo", state.isolatedKey === key);
             button.classList.toggle("muted", state.isolatedKey !== null && state.isolatedKey !== key);
             button.addEventListener("click", () => {
@@ -660,7 +667,7 @@ final class ReportGenerator {
           const metric = metrics[state.metric];
           [...data.stats].sort((a,b) => b[metric.stat] - a[metric.stat]).slice(0,10).forEach((row,index) => {
             const tr = document.createElement("tr");
-            tr.innerHTML = `<td>${index + 1}. ${escapeHTML(row.name)}</td><td>${row.maxCPU.toFixed(1)}%</td><td>${row.averageCPU.toFixed(1)}%</td><td>${(row.maxMemory/1048576).toFixed(1)} MiB</td><td>${(row.maxDiskRead/1048576).toFixed(2)} MiB/s</td><td>${(row.maxDiskWrite/1048576).toFixed(2)} MiB/s</td><td>${(row.maxNetworkReceive/1048576).toFixed(2)} MiB/s</td><td>${(row.maxNetworkSend/1048576).toFixed(2)} MiB/s</td><td>${Math.round(row.maxOpenFiles)}</td>`;
+            tr.innerHTML = `<td title="${escapeHTML(row.path)}">${index + 1}. ${escapeHTML(processLabel(row.key,row.name))}</td><td>${row.maxCPU.toFixed(1)}%</td><td>${row.averageCPU.toFixed(1)}%</td><td>${(row.maxMemory/1048576).toFixed(1)} MiB</td><td>${(row.maxDiskRead/1048576).toFixed(2)} MiB/s</td><td>${(row.maxDiskWrite/1048576).toFixed(2)} MiB/s</td><td>${(row.maxNetworkReceive/1048576).toFixed(2)} MiB/s</td><td>${(row.maxNetworkSend/1048576).toFixed(2)} MiB/s</td><td>${Math.round(row.maxOpenFiles)}</td>`;
             body.appendChild(tr);
           });
         }
@@ -875,7 +882,7 @@ final class ReportGenerator {
             const point = series.points.reduce((best,current) => Math.abs(current.timestamp-timestamp) < Math.abs(best.timestamp-timestamp) ? current : best);
             const value = point[metric.field];
             if (value == null || Math.abs(point.timestamp-timestamp) > data.bucketSeconds*2.5) return;
-            rows.push({ name: series.name, value, color: colorFor(key), timestamp: point.timestamp });
+            rows.push({ name: processLabel(key,series.name), value, color: colorFor(key), timestamp: point.timestamp });
           });
           if (!rows.length) { tooltip.style.display = "none"; return; }
           tooltip.innerHTML = `<time>${fmtTime(rows[0].timestamp)}</time>` + rows.map(row => `<div class="tooltip-row"><span><i style="background:${row.color}"></i>${escapeHTML(row.name)}</span><b>${metric.format(row.value)}</b></div>`).join("");
