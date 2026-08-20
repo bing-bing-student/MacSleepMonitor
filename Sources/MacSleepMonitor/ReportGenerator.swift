@@ -587,7 +587,10 @@ final class ReportGenerator {
         document.querySelector("#sampleCount").textContent = data.sampleCount.toLocaleString();
         document.querySelector("#processCount").textContent = data.processCount.toLocaleString();
         document.querySelector("#duration").textContent = fmtDuration(Math.max(0, data.endTime - data.startTime));
-        const gaps = data.events.filter(event => event.kind === "sampling_gap");
+        const gaps = data.events.filter(event =>
+          event.kind === "sampling_gap" ||
+          (event.kind === "clock_changed" && event.duration > 5)
+        );
         document.querySelector("#gapCount").textContent = gaps.length;
         document.querySelector("#range").innerHTML = `${fmtTime(data.startTime)}<br>${fmtTime(data.endTime)}`;
 

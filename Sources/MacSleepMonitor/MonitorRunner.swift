@@ -54,8 +54,23 @@ final class MonitorRunner: @unchecked Sendable {
             let uptime = cycleStarted
             let monotonicInterval = Double(uptime - previousUptime) / 1_000_000_000
             let wallInterval = now.timeIntervalSince(previousWallTime)
+            let suspendedSeconds = wallInterval - monotonicInterval
+            let suspensionThreshold = max(
+                configuration.sampleIntervalSeconds * 2.5,
+                2
+            )
 
-            if isSamplingGap(monotonicInterval) {
+            if suspendedSeconds > suspensionThreshold {
+                let event = MonitorEvent(
+                    timestamp: now,
+                    kind: .samplingGap,
+                    durationSeconds: wallInterval,
+                    details: "单调时钟在墙上时间前进期间暂停，符合系统睡眠或挂起；已重置累计计数基线"
+                )
+                try write(event: event)
+                sampler.resetBaseline()
+                print("[\(timeString(now))] 检测到系统睡眠或挂起：\(String(format: "%.1f", wallInterval))s")
+            } else if isSamplingGap(monotonicInterval) {
                 let event = MonitorEvent(
                     timestamp: now,
                     kind: .samplingGap,
@@ -65,11 +80,11 @@ final class MonitorRunner: @unchecked Sendable {
                 try write(event: event)
                 sampler.resetBaseline()
                 print("[\(timeString(now))] 检测到采样缺口：\(String(format: "%.1f", monotonicInterval))s")
-            } else if abs(wallInterval - monotonicInterval) > 5 {
+            } else if abs(suspendedSeconds) > 5 {
                 let event = MonitorEvent(
                     timestamp: now,
                     kind: .clockChanged,
-                    durationSeconds: wallInterval - monotonicInterval,
+                    durationSeconds: suspendedSeconds,
                     details: "系统墙上时钟与单调时钟出现偏差"
                 )
                 try write(event: event)
