@@ -465,7 +465,10 @@ final class ReportGenerator {
         .metric strong { display: block; margin-top: 8px; font: 500 24px/1 ui-monospace, monospace; }
         .panel { border: 1px solid var(--line); background: rgba(18,25,31,.96); }
         .toolbar { display: flex; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+        .toolbar-left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
         .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+        .view-toggle { display: flex; padding-left: 12px; border-left: 1px solid var(--line); }
+        .view-toggle button { border-radius: 4px; }
         button {
           appearance: none; border: 1px solid transparent; border-radius: 999px;
           padding: 7px 12px; color: var(--muted); background: transparent;
@@ -511,6 +514,8 @@ final class ReportGenerator {
           .metrics { grid-template-columns: repeat(2, 1fr); }
           .chart-wrap { height: 340px; padding: 8px; }
           .toolbar { align-items: flex-start; flex-direction: column; }
+          .toolbar-left { align-items: flex-start; flex-direction: column; }
+          .view-toggle { padding: 8px 0 0; border-left: 0; border-top: 1px solid var(--line); }
           .chart-controls { width: 100%; flex-wrap: wrap; }
         }
         </style>
@@ -529,7 +534,13 @@ final class ReportGenerator {
           </section>
           <section class="panel">
             <div class="toolbar">
-              <div class="tabs" id="tabs"></div>
+              <div class="toolbar-left">
+                <div class="tabs" id="tabs"></div>
+                <div class="view-toggle" id="viewToggle">
+                  <button type="button" data-view="aggregate">同名聚合</button>
+                  <button type="button" data-view="instance">进程实例</button>
+                </div>
+              </div>
               <div class="chart-controls">
                 <span class="viewport-range" id="viewportRange"></span>
                 <span class="unit" id="unit"></span>
@@ -540,7 +551,7 @@ final class ReportGenerator {
               <canvas id="chart"></canvas>
               <div class="tooltip" id="tooltip"></div>
             </div>
-            <div class="interaction-help">左键拖选放大 · 滚轮缩放 · Shift + 拖动平移 · 双击重置 · 点击进程名称独显</div>
+            <div class="interaction-help">默认同名聚合 · 可切换进程实例 · 左键拖选放大 · 滚轮缩放 · Shift + 拖动平移 · 点击名称独显</div>
             <div class="legend" id="legend"></div>
           </section>
           <section class="panel table-panel">
@@ -566,13 +577,17 @@ final class ReportGenerator {
         };
         const state = {
           metric: "cpu",
+          viewMode: "aggregate",
           visible: [],
           isolatedKey: null,
           viewStart: data.startTime,
           viewEnd: data.endTime,
           drag: null
         };
-        const statsByKey = new Map(data.stats.map(row => [row.key, row]));
+        const rawStatsByKey = new Map(data.stats.map(row => [row.key, row]));
+        let activeSeries = [];
+        let activeStats = [];
+        let activeStatsByKey = new Map();
         const canvas = document.querySelector("#chart");
         const ctx = canvas.getContext("2d");
         const tooltip = document.querySelector("#tooltip");
@@ -605,10 +620,120 @@ final class ReportGenerator {
           button.addEventListener("click", () => setMetric(key));
           tabs.appendChild(button);
         });
+        document.querySelectorAll("#viewToggle button").forEach(button => {
+          button.addEventListener("click", () => setViewMode(button.dataset.view));
+        });
+
+        function maxValue(points, field) {
+          return Math.max(...points.map(point => point[field]).filter(Number.isFinite), 0);
+        }
+
+        function summarizeSeries(series) {
+          const cpuValues = series.points.map(point => point.cpu).filter(Number.isFinite);
+          return {
+            key: series.key,
+            name: series.name,
+            path: series.paths?.join("\\n") || series.path || "",
+            instanceCount: series.instanceCount || 1,
+            maxCPU: maxValue(series.points, "cpu"),
+            averageCPU: cpuValues.length
+              ? cpuValues.reduce((sum,value) => sum+value,0)/cpuValues.length
+              : 0,
+            maxMemory: maxValue(series.points, "memory"),
+            maxDiskRead: maxValue(series.points, "diskRead"),
+            maxDiskWrite: maxValue(series.points, "diskWrite"),
+            maxNetworkReceive: maxValue(series.points, "networkReceive"),
+            maxNetworkSend: maxValue(series.points, "networkSend"),
+            maxOpenFiles: maxValue(series.points, "openFiles")
+          };
+        }
+
+        function aggregateByName() {
+          const groups = new Map();
+          const fields = ["cpu","memory","diskRead","diskWrite","networkReceive","networkSend","openFiles"];
+          data.series.forEach(series => {
+            let group = groups.get(series.name);
+            if (!group) {
+              group = {
+                key: `group:${series.name}`,
+                name: series.name,
+                instanceCount: 0,
+                paths: new Set(),
+                buckets: new Map()
+              };
+              groups.set(series.name, group);
+            }
+            group.instanceCount += 1;
+            const path = rawStatsByKey.get(series.key)?.path;
+            if (path) group.paths.add(path);
+            series.points.forEach(point => {
+              const bucket = Math.round((point.timestamp-data.startTime)/data.bucketSeconds);
+              let combined = group.buckets.get(bucket);
+              if (!combined) {
+                combined = {
+                  timestamp: data.startTime+bucket*data.bucketSeconds,
+                  present: {}
+                };
+                fields.forEach(field => combined[field] = 0);
+                group.buckets.set(bucket, combined);
+              }
+              fields.forEach(field => {
+                if (Number.isFinite(point[field])) {
+                  combined[field] += point[field];
+                  combined.present[field] = true;
+                }
+              });
+            });
+          });
+          return [...groups.values()].map(group => ({
+            key: group.key,
+            name: group.name,
+            instanceCount: group.instanceCount,
+            paths: [...group.paths],
+            points: [...group.buckets.values()]
+              .sort((a,b) => a.timestamp-b.timestamp)
+              .map(point => {
+                ["networkReceive","networkSend","openFiles"].forEach(field => {
+                  if (!point.present[field]) point[field] = null;
+                });
+                delete point.present;
+                return point;
+              })
+          }));
+        }
+
+        function rebuildActiveData() {
+          if (state.viewMode === "aggregate") {
+            activeSeries = aggregateByName();
+            activeStats = activeSeries.map(summarizeSeries);
+          } else {
+            activeSeries = data.series.map(series => {
+              const stat = rawStatsByKey.get(series.key);
+              return {
+                ...series,
+                instanceCount: 1,
+                path: stat?.path || ""
+              };
+            });
+            activeStats = data.stats.map(row => ({ ...row, instanceCount: 1 }));
+          }
+          activeStatsByKey = new Map(activeStats.map(row => [row.key,row]));
+        }
+
+        function setViewMode(viewMode) {
+          if (!["aggregate","instance"].includes(viewMode)) return;
+          state.viewMode = viewMode;
+          state.isolatedKey = null;
+          rebuildActiveData();
+          document.querySelectorAll("#viewToggle button").forEach(button => {
+            button.classList.toggle("active", button.dataset.view === viewMode);
+          });
+          setMetric(state.metric);
+        }
 
         function topKeys(metricKey) {
           const metric = metrics[metricKey];
-          return [...data.stats]
+          return [...activeStats]
             .sort((a,b) => b[metric.stat] - a[metric.stat])
             .map(row => row.key);
         }
@@ -624,6 +749,10 @@ final class ReportGenerator {
         }
 
         function processLabel(key, name) {
+          if (state.viewMode === "aggregate") {
+            const count = activeStatsByKey.get(key)?.instanceCount || 1;
+            return count > 1 ? `${name} · ${count} 个实例` : name;
+          }
           const pid = key.split(":")[0];
           return `${name} · PID ${pid}`;
         }
@@ -645,11 +774,11 @@ final class ReportGenerator {
           const legend = document.querySelector("#legend");
           legend.innerHTML = "";
           state.visible.forEach(key => {
-            const series = data.series.find(item => item.key === key);
+            const series = activeSeries.find(item => item.key === key);
             if (!series) return;
             const button = document.createElement("button");
             button.innerHTML = `<i style="background:${colorFor(key)}"></i>${escapeHTML(processLabel(key,series.name))}`;
-            button.title = statsByKey.get(key)?.path || processLabel(key, series.name);
+            button.title = activeStatsByKey.get(key)?.path || processLabel(key,series.name);
             button.classList.toggle("solo", state.isolatedKey === key);
             button.classList.toggle("muted", state.isolatedKey !== null && state.isolatedKey !== key);
             button.addEventListener("click", () => {
@@ -665,7 +794,7 @@ final class ReportGenerator {
           const body = document.querySelector("#ranking");
           body.innerHTML = "";
           const metric = metrics[state.metric];
-          [...data.stats].sort((a,b) => b[metric.stat] - a[metric.stat]).slice(0,10).forEach((row,index) => {
+          [...activeStats].sort((a,b) => b[metric.stat] - a[metric.stat]).slice(0,10).forEach((row,index) => {
             const tr = document.createElement("tr");
             tr.innerHTML = `<td title="${escapeHTML(row.path)}">${index + 1}. ${escapeHTML(processLabel(row.key,row.name))}</td><td>${row.maxCPU.toFixed(1)}%</td><td>${row.averageCPU.toFixed(1)}%</td><td>${(row.maxMemory/1048576).toFixed(1)} MiB</td><td>${(row.maxDiskRead/1048576).toFixed(2)} MiB/s</td><td>${(row.maxDiskWrite/1048576).toFixed(2)} MiB/s</td><td>${(row.maxNetworkReceive/1048576).toFixed(2)} MiB/s</td><td>${(row.maxNetworkSend/1048576).toFixed(2)} MiB/s</td><td>${Math.round(row.maxOpenFiles)}</td>`;
             body.appendChild(tr);
@@ -740,7 +869,7 @@ final class ReportGenerator {
           const metric = metrics[state.metric];
           const shown = state.visible
             .filter(key => state.isolatedKey === null || key === state.isolatedKey)
-            .map(key => data.series.find(item => item.key === key))
+            .map(key => activeSeries.find(item => item.key === key))
             .filter(Boolean);
           const values = shown.flatMap(series => series.points
             .filter(point => point.timestamp >= state.viewStart && point.timestamp <= state.viewEnd)
@@ -877,7 +1006,7 @@ final class ReportGenerator {
           state.visible
             .filter(key => state.isolatedKey === null || key === state.isolatedKey)
             .forEach(key => {
-            const series = data.series.find(item => item.key === key);
+            const series = activeSeries.find(item => item.key === key);
             if (!series?.points.length) return;
             const point = series.points.reduce((best,current) => Math.abs(current.timestamp-timestamp) < Math.abs(best.timestamp-timestamp) ? current : best);
             const value = point[metric.field];
@@ -941,7 +1070,7 @@ final class ReportGenerator {
         canvas.addEventListener("dblclick", resetViewport);
         resetRange.addEventListener("click", resetViewport);
         window.addEventListener("resize", resize);
-        setMetric("cpu");
+        setViewMode("aggregate");
         resize();
         </script>
         </body>
