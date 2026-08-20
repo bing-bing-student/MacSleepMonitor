@@ -148,7 +148,7 @@ $ ./scripts/run-5-minute-test.sh
 
 ## 安装每天定时任务
 
-默认时间是每天 `05:00–08:00`，执行：
+默认时间是每天 `05:00–08:00`，定时任务使用 2 秒采样间隔，以降低长时间运行的 CPU 和磁盘开销；五分钟手动测试仍使用 1 秒间隔。执行：
 
 ```bash
 $ sudo ./scripts/install-daily-monitor.sh 5 0 08:00 "$HOME/MacSleepMonitorData"

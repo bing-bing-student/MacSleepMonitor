@@ -74,7 +74,7 @@ cat > "${PLIST_PATH}" <<EOF
     <string>--output-root</string>
     <string>${OUTPUT_ROOT_XML}</string>
     <string>--interval</string>
-    <string>1</string>
+    <string>2</string>
     <string>--top</string>
     <string>10</string>
     <string>--bucket</string>

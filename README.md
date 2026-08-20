@@ -5,7 +5,7 @@
 1. 使用 macOS 自带的 `launchd` 每天在指定时间启动。
 2. 在指定结束时间停止采集并自动生成 HTML 统计图表。
 
-默认安装配置是每天 `05:00–08:00`，数据保存到当前用户主目录的 `MacSleepMonitorData`。
+默认安装配置是每天 `05:00–08:00`，以 2 秒间隔采集，数据保存到当前用户主目录的 `MacSleepMonitorData`。五分钟手动测试使用 1 秒间隔。
 
 迁移到另一台 Mac、五分钟测试和定时任务的完整步骤见
 [`MIGRATION-SOP.md`](MIGRATION-SOP.md)。
