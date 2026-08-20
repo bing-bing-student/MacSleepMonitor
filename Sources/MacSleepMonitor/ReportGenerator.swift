@@ -492,9 +492,15 @@ final class ReportGenerator {
         }
         button:hover { color: var(--text); border-color: var(--line); }
         button.active { color: #07110f; background: var(--accent); }
-        .unit { align-self: center; color: var(--muted); font: 500 12px/1 ui-monospace, monospace; }
+        .chart-controls { display: flex; align-items: center; gap: 10px; }
+        .viewport-range { color: var(--text); font: 500 12px/1 ui-monospace, monospace; white-space: nowrap; }
+        .unit { color: var(--muted); font: 500 12px/1 ui-monospace, monospace; }
+        .reset-range { border-color: var(--line); border-radius: 4px; }
+        .reset-range:disabled { opacity: .35; cursor: default; }
         .chart-wrap { position: relative; height: 440px; padding: 18px; }
-        canvas { display: block; width: 100%; height: 100%; }
+        canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+        canvas.panning { cursor: grabbing; }
+        .interaction-help { padding: 0 18px 12px; color: var(--muted); font-size: 11px; }
         .tooltip {
           position: absolute; display: none; pointer-events: none; min-width: 180px;
           padding: 10px 12px; border: 1px solid var(--line); background: #0c1217;
@@ -523,6 +529,7 @@ final class ReportGenerator {
           .metrics { grid-template-columns: repeat(2, 1fr); }
           .chart-wrap { height: 340px; padding: 8px; }
           .toolbar { align-items: flex-start; flex-direction: column; }
+          .chart-controls { width: 100%; flex-wrap: wrap; }
         }
         </style>
         </head>
@@ -541,12 +548,17 @@ final class ReportGenerator {
           <section class="panel">
             <div class="toolbar">
               <div class="tabs" id="tabs"></div>
-              <div class="unit" id="unit"></div>
+              <div class="chart-controls">
+                <span class="viewport-range" id="viewportRange"></span>
+                <span class="unit" id="unit"></span>
+                <button class="reset-range" id="resetRange" type="button">重置范围</button>
+              </div>
             </div>
             <div class="chart-wrap">
               <canvas id="chart"></canvas>
               <div class="tooltip" id="tooltip"></div>
             </div>
+            <div class="interaction-help">左键拖选放大 · 滚轮缩放 · Shift + 拖动平移 · 双击重置</div>
             <div class="legend" id="legend"></div>
           </section>
           <section class="panel table-panel">
@@ -571,11 +583,20 @@ final class ReportGenerator {
           openFiles: { label: "打开文件", unit: "个", field: "openFiles", stat: "maxOpenFiles", format: v => Math.round(v) + " 个" }
         };
         const colors = ["#66d4c2","#e8c56a","#7fa6ff","#e9897e","#b39ddb"];
-        const state = { metric: "cpu", hidden: new Set(), visible: [] };
+        const state = {
+          metric: "cpu",
+          hidden: new Set(),
+          visible: [],
+          viewStart: data.startTime,
+          viewEnd: data.endTime,
+          drag: null
+        };
         const canvas = document.querySelector("#chart");
         const ctx = canvas.getContext("2d");
         const tooltip = document.querySelector("#tooltip");
         const chartWrap = canvas.parentElement;
+        const viewportRange = document.querySelector("#viewportRange");
+        const resetRange = document.querySelector("#resetRange");
         const fmtTime = t => new Date(t * 1000).toLocaleString("zh-CN", { hour12: false });
         const fmtDuration = seconds => {
           if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
@@ -662,21 +683,68 @@ final class ReportGenerator {
           draw();
         }
 
+        function plotBounds() {
+          return {
+            left: 60,
+            top: 20,
+            right: canvas.clientWidth - 18,
+            bottom: canvas.clientHeight - 38
+          };
+        }
+
+        function clampView(start, end) {
+          const fullStart = data.startTime;
+          const fullEnd = Math.max(data.endTime, fullStart + 1);
+          const fullSpan = fullEnd - fullStart;
+          const minSpan = Math.min(Math.max(data.bucketSeconds * 2, 2), fullSpan);
+          const span = Math.min(Math.max(end - start, minSpan), fullSpan);
+          let nextStart = start;
+          let nextEnd = nextStart + span;
+          if (nextStart < fullStart) {
+            nextStart = fullStart;
+            nextEnd = nextStart + span;
+          }
+          if (nextEnd > fullEnd) {
+            nextEnd = fullEnd;
+            nextStart = nextEnd - span;
+          }
+          state.viewStart = nextStart;
+          state.viewEnd = nextEnd;
+        }
+
+        function resetViewport() {
+          state.viewStart = data.startTime;
+          state.viewEnd = Math.max(data.endTime, data.startTime + 1);
+          state.drag = null;
+          tooltip.style.display = "none";
+          draw();
+        }
+
+        function updateViewportLabel() {
+          const span = state.viewEnd - state.viewStart;
+          viewportRange.textContent = `${fmtTime(state.viewStart)} — ${fmtTime(state.viewEnd)} · ${fmtDuration(span)}`;
+          const fullSpan = Math.max(data.endTime - data.startTime, 1);
+          resetRange.disabled = span >= fullSpan - 0.001;
+        }
+
         function draw() {
           const width = canvas.clientWidth;
           const height = canvas.clientHeight;
           if (!width || !height) return;
           ctx.clearRect(0,0,width,height);
-          const plot = { left: 60, top: 20, right: width - 18, bottom: height - 38 };
+          const plot = plotBounds();
           const metric = metrics[state.metric];
           const shown = state.visible
             .filter(key => !state.hidden.has(key))
             .map(key => data.series.find(item => item.key === key))
             .filter(Boolean);
-          const values = shown.flatMap(series => series.points.map(point => point[metric.field]).filter(value => value != null && Number.isFinite(value)));
+          const values = shown.flatMap(series => series.points
+            .filter(point => point.timestamp >= state.viewStart && point.timestamp <= state.viewEnd)
+            .map(point => point[metric.field])
+            .filter(value => value != null && Number.isFinite(value)));
           const yMax = Math.max(...values, 1) * 1.12;
-          const xMin = data.startTime;
-          const xMax = Math.max(data.endTime, xMin + 1);
+          const xMin = state.viewStart;
+          const xMax = Math.max(state.viewEnd, xMin + 0.001);
           const x = value => plot.left + (value - xMin) / (xMax - xMin) * (plot.right - plot.left);
           const y = value => plot.bottom - value / yMax * (plot.bottom - plot.top);
           ctx.font = '11px ui-monospace, monospace';
@@ -730,6 +798,15 @@ final class ReportGenerator {
             });
           });
           ctx.restore();
+          if (state.drag?.mode === "select") {
+            const left = Math.min(state.drag.startX, state.drag.currentX);
+            const right = Math.max(state.drag.startX, state.drag.currentX);
+            ctx.fillStyle = "rgba(102,212,194,.14)";
+            ctx.strokeStyle = "#66d4c2";
+            ctx.lineWidth = 1;
+            ctx.fillRect(left, plot.top, right-left, plot.bottom-plot.top);
+            ctx.strokeRect(left+.5, plot.top+.5, Math.max(right-left-1,0), plot.bottom-plot.top-1);
+          }
           ctx.fillStyle = "#91a3ad";
           ctx.textAlign = "center";
           for (let i=0;i<=4;i++) {
@@ -738,13 +815,58 @@ final class ReportGenerator {
             ctx.fillText(new Date(timestamp*1000).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit",second:shortRange?"2-digit":undefined,hour12:false}), x(timestamp), height-12);
           }
           ctx.textAlign = "left";
+          updateViewportLabel();
         }
 
-        canvas.addEventListener("mousemove", event => {
+        function pointerX(event) {
           const rect = canvas.getBoundingClientRect();
-          const plotLeft = 60, plotRight = rect.width - 18;
-          if (event.offsetX < plotLeft || event.offsetX > plotRight) { tooltip.style.display = "none"; return; }
-          const timestamp = data.startTime + (event.offsetX-plotLeft)/(plotRight-plotLeft)*(data.endTime-data.startTime);
+          return event.clientX - rect.left;
+        }
+
+        canvas.addEventListener("pointerdown", event => {
+          if (event.button !== 0) return;
+          const plot = plotBounds();
+          const x = Math.min(Math.max(pointerX(event), plot.left), plot.right);
+          if (x < plot.left || x > plot.right) return;
+          canvas.setPointerCapture(event.pointerId);
+          tooltip.style.display = "none";
+          state.drag = event.shiftKey
+            ? {
+                mode: "pan",
+                startX: x,
+                currentX: x,
+                originalStart: state.viewStart,
+                originalEnd: state.viewEnd
+              }
+            : { mode: "select", startX: x, currentX: x };
+          canvas.classList.toggle("panning", state.drag.mode === "pan");
+        });
+
+        canvas.addEventListener("pointermove", event => {
+          const rect = canvas.getBoundingClientRect();
+          const plot = plotBounds();
+          const currentX = Math.min(Math.max(pointerX(event), plot.left), plot.right);
+          if (state.drag) {
+            state.drag.currentX = currentX;
+            if (state.drag.mode === "pan") {
+              const span = state.drag.originalEnd - state.drag.originalStart;
+              const secondsPerPixel = span / Math.max(plot.right - plot.left, 1);
+              const shift = (state.drag.startX - currentX) * secondsPerPixel;
+              clampView(
+                state.drag.originalStart + shift,
+                state.drag.originalEnd + shift
+              );
+            }
+            draw();
+            return;
+          }
+          if (currentX < plot.left || currentX > plot.right) {
+            tooltip.style.display = "none";
+            return;
+          }
+          const timestamp = state.viewStart +
+            (currentX-plot.left)/(plot.right-plot.left) *
+            (state.viewEnd-state.viewStart);
           const metric = metrics[state.metric];
           const rows = [];
           state.visible.filter(key => !state.hidden.has(key)).forEach((key,index) => {
@@ -758,11 +880,59 @@ final class ReportGenerator {
           if (!rows.length) { tooltip.style.display = "none"; return; }
           tooltip.innerHTML = `<time>${fmtTime(rows[0].timestamp)}</time>` + rows.map(row => `<div class="tooltip-row"><span><i style="background:${row.color}"></i>${escapeHTML(row.name)}</span><b>${metric.format(row.value)}</b></div>`).join("");
           tooltip.style.display = "block";
-          const left = Math.min(Math.max(event.offsetX + 14, 100), rect.width - 100);
+          const left = Math.min(Math.max(currentX + 14, 100), rect.width - 100);
           tooltip.style.left = `${left}px`;
           tooltip.style.top = `${Math.max(event.offsetY - 8, 20)}px`;
         });
-        canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
+
+        canvas.addEventListener("pointerup", event => {
+          if (!state.drag) return;
+          const drag = state.drag;
+          state.drag = null;
+          canvas.classList.remove("panning");
+          if (canvas.hasPointerCapture(event.pointerId)) {
+            canvas.releasePointerCapture(event.pointerId);
+          }
+          if (drag.mode === "select" && Math.abs(drag.currentX-drag.startX) >= 8) {
+            const plot = plotBounds();
+            const span = state.viewEnd - state.viewStart;
+            const leftRatio = (Math.min(drag.startX,drag.currentX)-plot.left)/(plot.right-plot.left);
+            const rightRatio = (Math.max(drag.startX,drag.currentX)-plot.left)/(plot.right-plot.left);
+            const originalStart = state.viewStart;
+            clampView(
+              originalStart + leftRatio * span,
+              originalStart + rightRatio * span
+            );
+          }
+          draw();
+        });
+
+        canvas.addEventListener("pointercancel", () => {
+          state.drag = null;
+          canvas.classList.remove("panning");
+          draw();
+        });
+        canvas.addEventListener("pointerleave", () => {
+          if (!state.drag) tooltip.style.display = "none";
+        });
+        canvas.addEventListener("wheel", event => {
+          event.preventDefault();
+          const plot = plotBounds();
+          const x = Math.min(Math.max(pointerX(event), plot.left), plot.right);
+          const ratio = (x-plot.left)/Math.max(plot.right-plot.left,1);
+          const oldSpan = state.viewEnd-state.viewStart;
+          const factor = Math.exp(event.deltaY * 0.0015);
+          const newSpan = oldSpan * factor;
+          const anchor = state.viewStart + ratio * oldSpan;
+          clampView(
+            anchor-ratio*newSpan,
+            anchor+(1-ratio)*newSpan
+          );
+          tooltip.style.display = "none";
+          draw();
+        }, { passive: false });
+        canvas.addEventListener("dblclick", resetViewport);
+        resetRange.addEventListener("click", resetViewport);
         window.addEventListener("resize", resize);
         setMetric("cpu");
         resize();
