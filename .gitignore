@@ -1,0 +1,12 @@
+.build/
+.swiftpm/
+monitor-data/
+MacSleepMonitorData/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store
+MacSleepMonitor-transfer*.zip
+sample-report.html
+Tests/
+mac-sleep-monitor-deployment-sop/

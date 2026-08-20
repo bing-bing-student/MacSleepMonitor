@@ -1,0 +1,240 @@
+# MacSleepMonitor
+
+用于定位 Mac 盒盖后异常发热的 Swift 采集器：
+
+1. 使用 macOS 自带的 `launchd` 每天在指定时间启动。
+2. 在指定结束时间停止采集并自动生成 HTML 统计图表。
+
+默认安装配置是每天 `05:00–08:00`，数据保存到当前用户主目录的 `MacSleepMonitorData`。
+
+迁移到另一台 Mac、五分钟测试和定时任务的完整步骤见
+[`MIGRATION-SOP.md`](MIGRATION-SOP.md)。
+
+## 快速开始
+
+目标 Mac 首次使用：
+
+```bash
+$ xcode-select --install
+```
+
+如果 Command Line Tools 已安装，这条命令会提示无需重复安装。
+
+```bash
+$ chmod +x scripts/*.sh
+```
+
+```bash
+$ swift build -c release
+```
+
+先运行五分钟测试并自动打开报告：
+
+```bash
+$ ./scripts/run-5-minute-test.sh
+```
+
+确认报告正常后，安装每天 `05:00–08:00` 的定时任务：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 5 0 08:00 "$HOME/MacSleepMonitorData"
+```
+
+## 当前能力
+
+- 每进程 CPU 利用率，采用“一个逻辑核心满载为 100%”的语义。
+- Resident Memory 和 Physical Footprint。
+- 磁盘读取、写入字节速率。
+- 每进程网络接收、发送速率，每 5 秒通过 macOS 自带 `nettop` 采样。
+- 逻辑写入次数速率。
+- 打开文件描述符数量，来自同一次 BSD 进程快照。
+- 每项指标独立 Top N，保存名单并集。
+- 以 `PID + 进程启动时间` 区分 PID 复用。
+- 检测长采样缺口，并在唤醒后重置累计计数基线。
+- SQLite WAL 持久化。
+- 可选 CSV 输出。
+- 从 SQLite 生成离线 HTML 交互图表。
+- 使用系统级 `LaunchDaemon` 每天定时运行。
+- 每次定时采集结束后自动生成报告。
+
+## 当前边界
+
+- IOKit 精确的 `Sleep`、`DarkWake`、`Wake` 事件。当前版本通过单调时钟采样缺口识别睡眠。
+- 普通权限 GUI；当前通过命令行和 HTML 报告操作。
+- 按 Bundle ID 聚合浏览器、XPC Service 等辅助进程。
+
+## 首次安装
+
+在本项目文件夹打开终端，依次执行：
+
+```bash
+$ swift build -c release
+```
+
+只有遇到 SwiftPM 沙箱权限错误时才使用
+`swift build -c release --disable-sandbox`。
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh
+```
+
+第二条命令会要求输入 Mac 登录密码。输入密码时终端不会显示字符，这是正常现象。
+
+安装完成后，不需要一直开着终端，也不需要每天手动运行。`launchd` 会每天 `05:00` 启动采集，到 `08:00` 自动停止并生成报告。
+
+## 每天查看报告
+
+Finder 中打开：
+
+```text
+个人主目录/MacSleepMonitorData/
+```
+
+每天一个目录：
+
+```text
+MacSleepMonitorData/
+├── launchd.stdout.log
+├── launchd.stderr.log
+└── 2026-08-21/
+    ├── monitor.sqlite
+    ├── report.html
+    └── csv/
+        ├── monitor_events.csv
+        └── process_samples.csv
+```
+
+双击当天目录中的 `report.html` 即可查看。报告完全离线，不需要启动服务器。
+
+图表包括：
+
+- CPU Top 5 时间曲线
+- 内存 Top 5 时间曲线
+- 磁盘读取 Top 5 时间曲线
+- 磁盘写入 Top 5 时间曲线
+- 网络接收 Top 5 时间曲线
+- 网络发送 Top 5 时间曲线
+- 打开文件数 Top 5 时间曲线
+- 各进程峰值与平均值排名表
+- 睡眠或采样中断区间
+
+## 修改采集时间
+
+安装脚本参数依次是：
+
+```text
+开始小时 开始分钟 结束时间 数据目录
+```
+
+例如每天凌晨 `04:30–07:30`：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 4 30 07:30
+```
+
+例如每天 `05:00–08:00`，同时指定其他数据目录：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh 5 0 08:00 "/Users/你的用户名/Documents/MacMonitorData"
+```
+
+重复运行安装命令会更新原来的定时任务，不会创建重复任务。
+
+## 检查任务状态
+
+```bash
+$ sudo launchctl print system/com.local.macsleepmonitor.daily
+```
+
+查看运行日志：
+
+```bash
+$ tail -n 100 ~/MacSleepMonitorData/launchd.stdout.log
+```
+
+查看错误日志：
+
+```bash
+$ tail -n 100 ~/MacSleepMonitorData/launchd.stderr.log
+```
+
+## 手动采集
+
+运行五分钟测试并自动生成、打开报告：
+
+```bash
+$ ./scripts/run-5-minute-test.sh
+```
+
+持续采集，按 `Ctrl+C` 停止：
+
+```text
+$ sudo .build/release/mac-sleep-monitor collect --interval 1 --top 10
+```
+
+## 手动生成报告
+
+把已有数据库转换为报告：
+
+```bash
+$ .build/release/mac-sleep-monitor report \
+  --database ./monitor-data/monitor.sqlite \
+  --output ./monitor-data/report.html
+```
+
+图表默认按 30 秒聚合。修改为 10 秒：
+
+```bash
+$ .build/release/mac-sleep-monitor report \
+  --database ./monitor-data/monitor.sqlite \
+  --output ./monitor-data/report.html \
+  --bucket 10
+```
+
+## 卸载任务
+
+```bash
+$ sudo ./scripts/uninstall-daily-monitor.sh
+```
+
+卸载不会删除历史数据。
+
+## 睡眠行为
+
+如果 Mac 真正进入睡眠，普通程序和 root 程序都不能持续采样。报告会把这段时间显示为空白或采样缺口。
+
+如果盒盖后 Mac 没有睡眠，或者唤醒后持续运行，采集器会继续记录进程指标，这正是需要定位的异常状态。
+
+如果 Mac 在 `05:00` 正在睡眠、但在 `08:00` 前醒来，`launchd` 通常会补触发任务，采集器只采集到当天 `08:00`。如果 `08:00` 后才醒来，当天任务会跳过，不会错误采集到其他时间段。
+
+## 数据解释
+
+`process_samples.cpu_percent` 使用活动监视器类似的语义：单个核心持续满载约为 `100`，多线程进程可能超过 `100`。
+
+`monitor_events.kind = sampling_gap` 表示采样线程长时间没有运行，通常是系统睡眠，也可能是严重调度阻塞。缺口后的第一次采样只建立新基线，不会把睡眠前后的累计 I/O 误算成瞬时尖峰。
+
+CSV、SQLite 和报告中没有记录的进程不代表资源为零，只表示它没有进入任何一项指标的 Top N。报告不会把缺失值补成零，也不会跨睡眠缺口连接折线。
+
+## 查询示例
+
+查看 CPU 峰值：
+
+```bash
+$ sqlite3 monitor-data/monitor.sqlite "SELECT datetime(timestamp,'unixepoch','localtime'), p.name, round(cpu_percent,1) FROM process_samples s JOIN processes p USING(stable_key) ORDER BY cpu_percent DESC LIMIT 20;"
+```
+
+查看采样缺口：
+
+```bash
+$ sqlite3 monitor-data/monitor.sqlite "SELECT datetime(timestamp,'unixepoch','localtime'), kind, round(duration_seconds,1), details FROM monitor_events ORDER BY timestamp;"
+```
+
+## 安全说明
+
+安装脚本只会：
+
+- 安装采集器到 `/usr/local/libexec/mac-sleep-monitor`
+- 安装定时配置到 `/Library/LaunchDaemons/com.local.macsleepmonitor.daily.plist`
+- 在指定目录写入采集数据、报告和日志
+
+它不会修改系统睡眠设置、不会关闭 SIP，也不会绕过 macOS 的安全机制。
