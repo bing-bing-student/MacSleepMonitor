@@ -9,10 +9,13 @@ OUTPUT_ROOT="${1:-${HOME}/MacSleepMonitorData/manual-tests}"
 RUN_ID="$(date '+%Y-%m-%d_%H-%M-%S')"
 RUN_DIR="${OUTPUT_ROOT}/${RUN_ID}"
 
-if [[ ! -x "${BINARY}" ]]; then
-  echo "未找到 Release 可执行文件，请先运行："
-  echo "  swift build -c release"
-  exit 1
+echo "检查并更新 Release 可执行文件..."
+if ! swift build -c release --package-path "${PROJECT_DIR}"; then
+  echo "普通构建受 SwiftPM 沙箱限制，使用 --disable-sandbox 重试..."
+  if ! swift build -c release --disable-sandbox --package-path "${PROJECT_DIR}"; then
+    echo "Release 构建失败，未开始采集。"
+    exit 1
+  fi
 fi
 
 mkdir -p "${RUN_DIR}"

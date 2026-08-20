@@ -200,6 +200,8 @@ $ tail -n 100 ~/MacSleepMonitorData/launchd.stderr.log
 $ ./scripts/run-5-minute-test.sh
 ```
 
+脚本会先执行 Release 增量构建，确保测试使用当前源码对应的最新二进制。五分钟测试总时长为 5 分钟，内部采样间隔仍为 1 秒；普通调度间隔超过 6 秒才记录为缺口。
+
 持续采集，按 `Ctrl+C` 停止：
 
 ```text
