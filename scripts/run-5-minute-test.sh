@@ -5,7 +5,53 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BINARY="${PROJECT_DIR}/.build/release/mac-sleep-monitor"
-OUTPUT_ROOT="${1:-${HOME}/MacSleepMonitorData/manual-tests}"
+OUTPUT_ROOT="${HOME}/MacSleepMonitorData/manual-tests"
+PROCESS_ARGS=()
+PROCESS_COUNT=0
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --process)
+      if [[ "$#" -lt 2 || -z "$2" ]]; then
+        echo "--process 缺少进程名称。"
+        exit 1
+      fi
+      if [[ "${PROCESS_COUNT}" -ge 10 ]]; then
+        echo "最多只能指定 10 个进程名称。"
+        exit 1
+      fi
+      PROCESS_ARGS+=(--process "$2")
+      PROCESS_COUNT="$((PROCESS_COUNT + 1))"
+      shift 2
+      ;;
+    --output-root)
+      if [[ "$#" -lt 2 || -z "$2" ]]; then
+        echo "--output-root 缺少目录。"
+        exit 1
+      fi
+      OUTPUT_ROOT="$2"
+      shift 2
+      ;;
+    --help|-h)
+      cat <<'EOF'
+用法：
+  ./scripts/run-5-minute-test.sh [--process 进程名称]... [--output-root 数据目录]
+
+示例：
+  ./scripts/run-5-minute-test.sh
+  ./scripts/run-5-minute-test.sh --process node --process "Google Chrome"
+
+最多指定 10 个进程名称；不指定时保持原有 Top 10 并集采集方式。
+EOF
+      exit 0
+      ;;
+    *)
+      echo "未知参数：$1"
+      exit 1
+      ;;
+  esac
+done
+
 RUN_ID="$(date '+%Y-%m-%d_%H-%M-%S')"
 RUN_DIR="${OUTPUT_ROOT}/${RUN_ID}"
 
@@ -26,7 +72,8 @@ sudo "${BINARY}" collect \
   --interval 1 \
   --top 10 \
   --database "${RUN_DIR}/monitor.sqlite" \
-  --csv-directory "${RUN_DIR}/csv"
+  --csv-directory "${RUN_DIR}/csv" \
+  "${PROCESS_ARGS[@]}"
 
 echo "生成 HTML 报告..."
 sudo "${BINARY}" report \

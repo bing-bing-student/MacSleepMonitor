@@ -4,7 +4,8 @@ enum TopRanker {
     static func rank(
         samples: [ProcessSample],
         topCount: Int,
-        includeAllProcesses: Bool
+        includeAllProcesses: Bool,
+        trackedProcessNames: [String]
     ) -> [RankedProcessSample] {
         guard !samples.isEmpty else {
             return []
@@ -39,9 +40,16 @@ enum TopRanker {
             into: &ranksByKey
         )
 
+        let normalizedTrackedNames = Set(
+            trackedProcessNames.map { $0.lowercased() }
+        )
+
         return samples.compactMap { sample in
             let ranks = ranksByKey[sample.identity.stableKey] ?? [:]
-            guard includeAllProcesses || !ranks.isEmpty else {
+            let isTracked = normalizedTrackedNames.contains(
+                sample.identity.name.lowercased()
+            )
+            guard includeAllProcesses || isTracked || !ranks.isEmpty else {
                 return nil
             }
             return RankedProcessSample(sample: sample, ranks: ranks)

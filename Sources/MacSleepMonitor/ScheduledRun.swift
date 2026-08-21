@@ -9,6 +9,7 @@ struct ScheduledRunConfiguration {
     let sampleIntervalSeconds: Double
     let topCount: Int
     let bucketSeconds: Int
+    let trackedProcessNames: [String]
 }
 
 enum ScheduledRunError: Error, CustomStringConvertible {
@@ -107,11 +108,15 @@ enum ScheduledRun {
             topCount: configuration.topCount,
             databaseURL: databaseURL,
             csvDirectoryURL: runDirectory.appendingPathComponent("csv", isDirectory: true),
-            includeAllProcesses: false
+            includeAllProcesses: false,
+            trackedProcessNames: configuration.trackedProcessNames
         )
 
         print("定时采集目录：\(runDirectory.path)")
         print("计划结束时间：\(window.end)")
+        if !configuration.trackedProcessNames.isEmpty {
+            print("固定跟踪：\(configuration.trackedProcessNames.joined(separator: ", "))")
+        }
         let runner = try MonitorRunner(configuration: monitorConfiguration)
         try runner.run()
 

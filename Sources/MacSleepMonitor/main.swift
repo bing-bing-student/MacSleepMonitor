@@ -27,6 +27,27 @@ enum PathResolver {
     }
 }
 
+enum TrackedProcessNames {
+    static let maximumCount = 10
+
+    static func append(_ rawValue: String, to names: inout [String]) throws {
+        let name = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            throw CommandLineError.invalidValue(option: "--process", value: rawValue)
+        }
+        if names.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+            return
+        }
+        guard names.count < maximumCount else {
+            throw CommandLineError.invalidValue(
+                option: "--process",
+                value: "最多指定 \(maximumCount) 个不同的进程名称"
+            )
+        }
+        names.append(name)
+    }
+}
+
 struct CollectOptions {
     var interval = 1.0
     var fileDescriptorInterval = 10.0
@@ -35,6 +56,7 @@ struct CollectOptions {
     var databasePath = "./monitor-data/monitor.sqlite"
     var csvDirectoryPath: String? = "./monitor-data/csv"
     var includeAllProcesses = false
+    var trackedProcessNames: [String] = []
     var showHelp = false
 
     static func parse(_ arguments: [String]) throws -> CollectOptions {
@@ -85,6 +107,11 @@ struct CollectOptions {
                 options.csvDirectoryPath = nil
             case "--all-processes":
                 options.includeAllProcesses = true
+            case "--process":
+                try TrackedProcessNames.append(
+                    nextValue(for: argument),
+                    to: &options.trackedProcessNames
+                )
             case "--help", "-h":
                 options.showHelp = true
             default:
@@ -105,7 +132,8 @@ struct CollectOptions {
             csvDirectoryURL: csvDirectoryPath.map {
                 PathResolver.resolve($0, relativeTo: currentDirectory)
             },
-            includeAllProcesses: includeAllProcesses
+            includeAllProcesses: includeAllProcesses,
+            trackedProcessNames: trackedProcessNames
         )
     }
 }
@@ -154,6 +182,7 @@ struct DailyRunOptions {
     var interval = 5.0
     var topCount = 10
     var bucketSeconds = 30
+    var trackedProcessNames: [String] = []
 
     static func parse(_ arguments: [String]) throws -> DailyRunOptions {
         var options = DailyRunOptions()
@@ -192,6 +221,11 @@ struct DailyRunOptions {
                     throw CommandLineError.invalidValue(option: argument, value: raw)
                 }
                 options.bucketSeconds = parsed
+            case "--process":
+                try TrackedProcessNames.append(
+                    value(),
+                    to: &options.trackedProcessNames
+                )
             default:
                 throw CommandLineError.unknownOption(argument)
             }
@@ -238,7 +272,8 @@ struct DailyRunOptions {
             ),
             sampleIntervalSeconds: interval,
             topCount: topCount,
-            bucketSeconds: bucketSeconds
+            bucketSeconds: bucketSeconds,
+            trackedProcessNames: trackedProcessNames
         )
     }
 }
@@ -260,6 +295,7 @@ MacSleepMonitor：macOS 进程资源采集器 MVP
   --csv-directory <路径>   CSV 输出目录，默认 ./monitor-data/csv
   --no-csv                 不输出 CSV
   --all-processes          保存全部可见进程，而非各指标 Top N 并集
+  --process <进程名称>     固定跟踪指定名称，可重复，最多 10 个
 
 报告选项：
   --database <路径>        输入 SQLite 文件
@@ -269,6 +305,7 @@ MacSleepMonitor：macOS 进程资源采集器 MVP
 定时运行选项：
   --start <HH:MM>          开始采集时间
   --end <HH:MM>            停止采集时间；早于开始表示次日
+  --process <进程名称>     固定跟踪指定名称，可重复，最多 10 个
   --output-root <路径>     每日数据根目录
   --interval <秒>          采样间隔
   --top <数量>             每项指标 Top N

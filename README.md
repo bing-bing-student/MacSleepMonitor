@@ -166,6 +166,18 @@ $ sudo ./scripts/install-daily-monitor.sh 03:30 07:50
 $ sudo ./scripts/install-daily-monitor.sh 23:30 02:00
 ```
 
+定时任务固定跟踪指定进程：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh \
+  05:00 08:00 \
+  "$HOME/MacSleepMonitorData" \
+  --process node \
+  --process "Google Chrome"
+```
+
+重复安装时必须再次写出需要跟踪的全部名称；不带 `--process` 重新安装会恢复为仅采集 Top 10 并集。
+
 ## 检查任务状态
 
 ```bash
@@ -202,10 +214,30 @@ $ ./scripts/run-5-minute-test.sh
 
 脚本会先执行 Release 增量构建，确保测试使用当前源码对应的最新二进制。五分钟测试总时长为 5 分钟，内部采样间隔仍为 1 秒；普通调度间隔超过 6 秒才记录为缺口。
 
+固定跟踪指定进程，不受 Top 10 排名限制：
+
+```bash
+$ ./scripts/run-5-minute-test.sh \
+  --process node \
+  --process "Google Chrome"
+```
+
+`--process` 可重复使用，最多指定 10 个不同名称。名称精确匹配但忽略大小写；同名的所有 PID 都会持续采集。不指定时保持原有 Top 10 并集方式。
+
 持续采集，按 `Ctrl+C` 停止：
 
 ```text
 $ sudo .build/release/mac-sleep-monitor collect --interval 1 --top 10
+```
+
+直接使用采集器固定跟踪进程：
+
+```bash
+$ sudo .build/release/mac-sleep-monitor collect \
+  --interval 1 \
+  --top 10 \
+  --process node \
+  --process Python
 ```
 
 ## 手动生成报告

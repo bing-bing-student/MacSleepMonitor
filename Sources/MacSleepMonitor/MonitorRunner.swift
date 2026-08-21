@@ -43,6 +43,9 @@ final class MonitorRunner: @unchecked Sendable {
             print("CSV：\(csvDirectoryURL.path)")
         }
         print("采样间隔：\(configuration.sampleIntervalSeconds)s，Top \(configuration.topCount)")
+        if !configuration.trackedProcessNames.isEmpty {
+            print("固定跟踪：\(configuration.trackedProcessNames.joined(separator: ", "))")
+        }
         if geteuid() != 0 {
             print("提示：当前不是 root，部分系统进程可能不可见。需要完整采集时请使用 sudo。")
         }
@@ -99,7 +102,8 @@ final class MonitorRunner: @unchecked Sendable {
             let ranked = TopRanker.rank(
                 samples: samples,
                 topCount: configuration.topCount,
-                includeAllProcesses: configuration.includeAllProcesses
+                includeAllProcesses: configuration.includeAllProcesses,
+                trackedProcessNames: configuration.trackedProcessNames
             )
             try store.write(samples: ranked)
             try csvWriter?.write(samples: ranked)

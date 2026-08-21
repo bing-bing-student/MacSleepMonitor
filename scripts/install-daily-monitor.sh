@@ -10,21 +10,54 @@ PLIST_PATH="/Library/LaunchDaemons/${LABEL}.plist"
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   cat <<'EOF'
 用法：
-  sudo ./scripts/install-daily-monitor.sh [开始时间] [结束时间] [数据目录]
+  sudo ./scripts/install-daily-monitor.sh [开始时间] [结束时间] [数据目录] [--process 进程名称]...
 
 示例：
   sudo ./scripts/install-daily-monitor.sh 05:00 08:00
   sudo ./scripts/install-daily-monitor.sh 3:30 7:50
   sudo ./scripts/install-daily-monitor.sh 23:30 02:00 "$HOME/MacSleepMonitorData"
+  sudo ./scripts/install-daily-monitor.sh 05:00 08:00 "$HOME/MacSleepMonitorData" --process node --process "Google Chrome"
 
 定时任务固定每 5 秒采样一次；五分钟测试脚本仍每 1 秒采样一次。
 结束时间早于开始时间时，按次日结束处理。
+最多指定 10 个进程名称；不指定时保持原有 Top 10 并集采集方式。
 EOF
   exit 0
 fi
 
 START_TIME="${1:-05:00}"
-END_TIME="${2:-08:00}"
+if [[ "$#" -gt 0 ]]; then shift; fi
+END_TIME="08:00"
+if [[ "$#" -gt 0 ]]; then
+  END_TIME="$1"
+  shift
+else
+  END_TIME="08:00"
+fi
+
+OUTPUT_ROOT_ARGUMENT=""
+if [[ "$#" -gt 0 && "$1" != "--process" ]]; then
+  OUTPUT_ROOT_ARGUMENT="$1"
+  shift
+fi
+
+PROCESS_NAMES=()
+while [[ "$#" -gt 0 ]]; do
+  if [[ "$1" != "--process" ]]; then
+    echo "未知参数：$1"
+    exit 1
+  fi
+  if [[ "$#" -lt 2 || -z "$2" ]]; then
+    echo "--process 缺少进程名称。"
+    exit 1
+  fi
+  if [[ "${#PROCESS_NAMES[@]}" -ge 10 ]]; then
+    echo "最多只能指定 10 个进程名称。"
+    exit 1
+  fi
+  PROCESS_NAMES+=("$2")
+  shift 2
+done
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "请使用 sudo 运行此脚本。"
@@ -34,7 +67,7 @@ fi
 REAL_USER="${SUDO_USER:-root}"
 REAL_HOME="$(dscl . -read "/Users/${REAL_USER}" NFSHomeDirectory | awk '{print $2}')"
 REAL_GROUP="$(id -gn "${REAL_USER}")"
-OUTPUT_ROOT="${3:-${REAL_HOME}/MacSleepMonitorData}"
+OUTPUT_ROOT="${OUTPUT_ROOT_ARGUMENT:-${REAL_HOME}/MacSleepMonitorData}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_BINARY="${PROJECT_DIR}/.build/release/mac-sleep-monitor"
@@ -83,6 +116,12 @@ launchctl bootout system "${PLIST_PATH}" >/dev/null 2>&1 || true
 mkdir -p "${INSTALL_DIR}" "${OUTPUT_ROOT}"
 install -o root -g wheel -m 755 "${SOURCE_BINARY}" "${BINARY_PATH}"
 OUTPUT_ROOT_XML="$(xml_escape "${OUTPUT_ROOT}")"
+PROCESS_ARGUMENTS_XML=""
+for process_name in "${PROCESS_NAMES[@]}"; do
+  process_name_xml="$(xml_escape "${process_name}")"
+  PROCESS_ARGUMENTS_XML+="    <string>--process</string>"$'\n'
+  PROCESS_ARGUMENTS_XML+="    <string>${process_name_xml}</string>"$'\n'
+done
 
 cat > "${PLIST_PATH}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -107,6 +146,7 @@ cat > "${PLIST_PATH}" <<EOF
     <string>10</string>
     <string>--bucket</string>
     <string>30</string>
+${PROCESS_ARGUMENTS_XML}
   </array>
   <key>StartCalendarInterval</key>
   <dict>
@@ -138,5 +178,8 @@ launchctl bootstrap system "${PLIST_PATH}"
 echo "定时监控已安装。"
 echo "采集时间：每天 ${START_TIME_NORMALIZED} 到 ${END_TIME_NORMALIZED}"
 echo "采样间隔：5 秒"
+if [[ "${#PROCESS_NAMES[@]}" -gt 0 ]]; then
+  echo "固定跟踪：${PROCESS_NAMES[*]}"
+fi
 echo "报告目录：${OUTPUT_ROOT}/YYYY-MM-DD/report.html"
 echo "任务状态：sudo launchctl print system/${LABEL}"

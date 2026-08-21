@@ -78,6 +78,7 @@ struct MonitorConfiguration: Sendable {
     let databaseURL: URL
     let csvDirectoryURL: URL?
     let includeAllProcesses: Bool
+    let trackedProcessNames: [String]
 }
 
 enum ByteFormatter {

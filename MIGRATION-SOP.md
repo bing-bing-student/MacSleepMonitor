@@ -117,6 +117,16 @@ scheduled-run
 $ ./scripts/run-5-minute-test.sh
 ```
 
+如需持续采集指定进程，即使它没有进入 Top 10：
+
+```bash
+$ ./scripts/run-5-minute-test.sh \
+  --process node \
+  --process "Google Chrome"
+```
+
+最多指定 10 个不同名称，名称匹配忽略大小写；同名的所有 PID 都会采集。不指定时保持原有行为。
+
 脚本会：
 
 1. 请求管理员密码。
@@ -153,6 +163,18 @@ $ ./scripts/run-5-minute-test.sh
 ```bash
 $ sudo ./scripts/install-daily-monitor.sh 05:00 08:00 "$HOME/MacSleepMonitorData"
 ```
+
+定时任务固定跟踪指定进程：
+
+```bash
+$ sudo ./scripts/install-daily-monitor.sh \
+  05:00 08:00 \
+  "$HOME/MacSleepMonitorData" \
+  --process node \
+  --process "Google Chrome"
+```
+
+重复安装会覆盖原配置，因此更新任务时必须再次列出需要固定跟踪的全部名称。
 
 安装脚本会：
 
