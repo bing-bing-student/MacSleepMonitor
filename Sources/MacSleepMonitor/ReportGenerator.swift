@@ -481,6 +481,18 @@ final class ReportGenerator {
         .unit { color: var(--muted); font: 500 12px/1 ui-monospace, monospace; }
         .reset-range { border-color: var(--line); border-radius: 4px; }
         .reset-range:disabled { opacity: .35; cursor: default; }
+        .filter-bar { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: rgba(8,13,17,.42); }
+        .filter-input-wrap { position: relative; flex: 1; max-width: 520px; }
+        .filter-input-wrap::before { content: "⌕"; position: absolute; left: 11px; top: 50%; transform: translateY(-52%); color: var(--accent); font: 18px/1 Georgia, serif; }
+        .filter-input {
+          width: 100%; height: 36px; padding: 0 38px 0 34px; border: 1px solid var(--line);
+          border-radius: 4px; outline: none; color: var(--text); background: #0c1217;
+          font: 500 13px/1 "Avenir Next", "PingFang SC", sans-serif;
+        }
+        .filter-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(102,212,194,.12); }
+        .filter-input::placeholder { color: #62747e; }
+        .clear-filter { position: absolute; right: 5px; top: 4px; width: 28px; height: 28px; padding: 0; border-radius: 4px; }
+        .filter-count { color: var(--muted); font: 500 12px/1 ui-monospace, monospace; white-space: nowrap; }
         .chart-wrap { position: relative; height: 440px; padding: 18px; }
         canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
         canvas.panning { cursor: grabbing; }
@@ -517,6 +529,8 @@ final class ReportGenerator {
           .toolbar-left { align-items: flex-start; flex-direction: column; }
           .view-toggle { padding: 8px 0 0; border-left: 0; border-top: 1px solid var(--line); }
           .chart-controls { width: 100%; flex-wrap: wrap; }
+          .filter-bar { align-items: stretch; flex-direction: column; }
+          .filter-input-wrap { max-width: none; }
         }
         </style>
         </head>
@@ -546,6 +560,13 @@ final class ReportGenerator {
                 <span class="unit" id="unit"></span>
                 <button class="reset-range" id="resetRange" type="button">重置范围</button>
               </div>
+            </div>
+            <div class="filter-bar">
+              <div class="filter-input-wrap">
+                <input class="filter-input" id="processFilter" type="search" autocomplete="off" spellcheck="false" placeholder="模糊查询进程名称，例如 chrome render">
+                <button class="clear-filter" id="clearFilter" type="button" aria-label="清空进程过滤">×</button>
+              </div>
+              <span class="filter-count" id="filterCount"></span>
             </div>
             <div class="chart-wrap">
               <canvas id="chart"></canvas>
@@ -578,6 +599,7 @@ final class ReportGenerator {
         const state = {
           metric: "cpu",
           viewMode: "aggregate",
+          processQuery: "",
           visible: [],
           isolatedKey: null,
           viewStart: data.startTime,
@@ -594,6 +616,9 @@ final class ReportGenerator {
         const chartWrap = canvas.parentElement;
         const viewportRange = document.querySelector("#viewportRange");
         const resetRange = document.querySelector("#resetRange");
+        const processFilter = document.querySelector("#processFilter");
+        const clearFilter = document.querySelector("#clearFilter");
+        const filterCount = document.querySelector("#filterCount");
         const fmtTime = t => new Date(t * 1000).toLocaleString("zh-CN", { hour12: false });
         const fmtDuration = seconds => {
           if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
@@ -622,6 +647,18 @@ final class ReportGenerator {
         });
         document.querySelectorAll("#viewToggle button").forEach(button => {
           button.addEventListener("click", () => setViewMode(button.dataset.view));
+        });
+        processFilter.addEventListener("input", () => {
+          state.processQuery = processFilter.value;
+          state.isolatedKey = null;
+          setMetric(state.metric);
+        });
+        clearFilter.addEventListener("click", () => {
+          processFilter.value = "";
+          state.processQuery = "";
+          state.isolatedKey = null;
+          setMetric(state.metric);
+          processFilter.focus();
         });
 
         function maxValue(points, field) {
@@ -734,8 +771,24 @@ final class ReportGenerator {
         function topKeys(metricKey) {
           const metric = metrics[metricKey];
           return [...activeStats]
+            .filter(matchesProcessQuery)
             .sort((a,b) => b[metric.stat] - a[metric.stat])
             .map(row => row.key);
+        }
+
+        function queryTokens() {
+          return state.processQuery
+            .trim()
+            .toLocaleLowerCase()
+            .split(/\\s+/)
+            .filter(Boolean);
+        }
+
+        function matchesProcessQuery(row) {
+          const tokens = queryTokens();
+          if (!tokens.length) return true;
+          const name = row.name.toLocaleLowerCase();
+          return tokens.every(token => name.includes(token));
         }
 
         function colorFor(key) {
@@ -765,6 +818,8 @@ final class ReportGenerator {
           }
           document.querySelectorAll("#tabs button").forEach(button => button.classList.toggle("active", button.dataset.metric === metricKey));
           document.querySelector("#unit").textContent = metrics[metricKey].unit;
+          filterCount.textContent = `匹配 ${state.visible.length} / ${activeStats.length}`;
+          clearFilter.hidden = state.processQuery.length === 0;
           buildLegend();
           buildTable();
           draw();
@@ -794,7 +849,11 @@ final class ReportGenerator {
           const body = document.querySelector("#ranking");
           body.innerHTML = "";
           const metric = metrics[state.metric];
-          [...activeStats].sort((a,b) => b[metric.stat] - a[metric.stat]).slice(0,10).forEach((row,index) => {
+          [...activeStats]
+            .filter(matchesProcessQuery)
+            .sort((a,b) => b[metric.stat] - a[metric.stat])
+            .slice(0,10)
+            .forEach((row,index) => {
             const tr = document.createElement("tr");
             tr.innerHTML = `<td title="${escapeHTML(row.path)}">${index + 1}. ${escapeHTML(processLabel(row.key,row.name))}</td><td>${row.maxCPU.toFixed(1)}%</td><td>${row.averageCPU.toFixed(1)}%</td><td>${(row.maxMemory/1048576).toFixed(1)} MiB</td><td>${(row.maxDiskRead/1048576).toFixed(2)} MiB/s</td><td>${(row.maxDiskWrite/1048576).toFixed(2)} MiB/s</td><td>${(row.maxNetworkReceive/1048576).toFixed(2)} MiB/s</td><td>${(row.maxNetworkSend/1048576).toFixed(2)} MiB/s</td><td>${Math.round(row.maxOpenFiles)}</td>`;
             body.appendChild(tr);
@@ -889,6 +948,19 @@ final class ReportGenerator {
             ctx.beginPath(); ctx.moveTo(plot.left,yy); ctx.lineTo(plot.right,yy); ctx.stroke();
             const value = yMax * (1-i/4);
             ctx.fillText(metric.format(value), 4, yy + 4);
+          }
+          if (!shown.length) {
+            ctx.fillStyle = "#91a3ad";
+            ctx.font = '500 14px "Avenir Next", "PingFang SC", sans-serif';
+            ctx.textAlign = "center";
+            ctx.fillText(
+              state.processQuery.trim() ? "没有匹配的进程" : "没有可显示的进程",
+              (plot.left+plot.right)/2,
+              (plot.top+plot.bottom)/2
+            );
+            ctx.textAlign = "left";
+            updateViewportLabel();
+            return;
           }
           ctx.save();
           ctx.beginPath();
@@ -1069,6 +1141,16 @@ final class ReportGenerator {
         }, { passive: false });
         canvas.addEventListener("dblclick", resetViewport);
         resetRange.addEventListener("click", resetViewport);
+        window.addEventListener("keydown", event => {
+          const editing = ["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);
+          if (event.key === "/" && !editing) {
+            event.preventDefault();
+            processFilter.focus();
+          } else if (event.key === "Escape" && document.activeElement === processFilter) {
+            clearFilter.click();
+            processFilter.blur();
+          }
+        });
         window.addEventListener("resize", resize);
         setViewMode("aggregate");
         resize();
