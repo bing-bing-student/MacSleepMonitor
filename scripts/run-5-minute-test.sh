@@ -41,7 +41,7 @@ while [[ "$#" -gt 0 ]]; do
   ./scripts/run-5-minute-test.sh
   ./scripts/run-5-minute-test.sh --process node --process "Google Chrome"
 
-最多指定 10 个进程名称；不指定时保持原有 Top 10 并集采集方式。
+指定后只采集这些进程；最多 10 个名称。不指定时保持原有 Top 10 并集采集方式。
 EOF
       exit 0
       ;;

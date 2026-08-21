@@ -115,7 +115,7 @@ enum ScheduledRun {
         print("定时采集目录：\(runDirectory.path)")
         print("计划结束时间：\(window.end)")
         if !configuration.trackedProcessNames.isEmpty {
-            print("固定跟踪：\(configuration.trackedProcessNames.joined(separator: ", "))")
+            print("仅采集指定进程：\(configuration.trackedProcessNames.joined(separator: ", "))")
         }
         let runner = try MonitorRunner(configuration: monitorConfiguration)
         try runner.run()

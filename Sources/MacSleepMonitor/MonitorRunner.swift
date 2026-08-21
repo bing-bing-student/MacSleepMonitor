@@ -44,7 +44,7 @@ final class MonitorRunner: @unchecked Sendable {
         }
         print("采样间隔：\(configuration.sampleIntervalSeconds)s，Top \(configuration.topCount)")
         if !configuration.trackedProcessNames.isEmpty {
-            print("固定跟踪：\(configuration.trackedProcessNames.joined(separator: ", "))")
+            print("仅采集指定进程：\(configuration.trackedProcessNames.joined(separator: ", "))")
         }
         if geteuid() != 0 {
             print("提示：当前不是 root，部分系统进程可能不可见。需要完整采集时请使用 sudo。")
@@ -179,13 +179,24 @@ final class MonitorRunner: @unchecked Sendable {
     }
 
     private func printSummary(_ ranked: [RankedProcessSample], timestamp: Date) {
-        let topCPU = ranked
-            .filter { $0.ranks[.cpu] != nil }
-            .sorted { ($0.ranks[.cpu] ?? .max) < ($1.ranks[.cpu] ?? .max) }
-            .prefix(3)
+        let topCPU: ArraySlice<RankedProcessSample>
+        if configuration.trackedProcessNames.isEmpty {
+            topCPU = ranked
+                .filter { $0.ranks[.cpu] != nil }
+                .sorted { ($0.ranks[.cpu] ?? .max) < ($1.ranks[.cpu] ?? .max) }
+                .prefix(3)
+        } else {
+            topCPU = ranked
+                .sorted { $0.sample.cpuPercent > $1.sample.cpuPercent }
+                .prefix(3)
+        }
 
         guard !topCPU.isEmpty else {
-            print("[\(timeString(timestamp))] 正在建立采样基线…")
+            if configuration.trackedProcessNames.isEmpty {
+                print("[\(timeString(timestamp))] 正在建立采样基线…")
+            } else {
+                print("[\(timeString(timestamp))] 首次采样或指定进程当前未运行")
+            }
             return
         }
 

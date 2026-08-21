@@ -20,7 +20,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 
 定时任务固定每 5 秒采样一次；五分钟测试脚本仍每 1 秒采样一次。
 结束时间早于开始时间时，按次日结束处理。
-最多指定 10 个进程名称；不指定时保持原有 Top 10 并集采集方式。
+指定后只采集这些进程；最多 10 个名称。不指定时保持原有 Top 10 并集采集方式。
 EOF
   exit 0
 fi
@@ -179,7 +179,7 @@ echo "定时监控已安装。"
 echo "采集时间：每天 ${START_TIME_NORMALIZED} 到 ${END_TIME_NORMALIZED}"
 echo "采样间隔：5 秒"
 if [[ "${#PROCESS_NAMES[@]}" -gt 0 ]]; then
-  echo "固定跟踪：${PROCESS_NAMES[*]}"
+  echo "仅采集指定进程：${PROCESS_NAMES[*]}"
 fi
 echo "报告目录：${OUTPUT_ROOT}/YYYY-MM-DD/report.html"
 echo "任务状态：sudo launchctl print system/${LABEL}"

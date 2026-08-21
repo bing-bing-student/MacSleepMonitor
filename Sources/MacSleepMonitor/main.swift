@@ -295,7 +295,7 @@ MacSleepMonitor：macOS 进程资源采集器 MVP
   --csv-directory <路径>   CSV 输出目录，默认 ./monitor-data/csv
   --no-csv                 不输出 CSV
   --all-processes          保存全部可见进程，而非各指标 Top N 并集
-  --process <进程名称>     固定跟踪指定名称，可重复，最多 10 个
+  --process <进程名称>     仅采集指定名称，可重复，最多 10 个
 
 报告选项：
   --database <路径>        输入 SQLite 文件
@@ -305,7 +305,7 @@ MacSleepMonitor：macOS 进程资源采集器 MVP
 定时运行选项：
   --start <HH:MM>          开始采集时间
   --end <HH:MM>            停止采集时间；早于开始表示次日
-  --process <进程名称>     固定跟踪指定名称，可重复，最多 10 个
+  --process <进程名称>     仅采集指定名称，可重复，最多 10 个
   --output-root <路径>     每日数据根目录
   --interval <秒>          采样间隔
   --top <数量>             每项指标 Top N

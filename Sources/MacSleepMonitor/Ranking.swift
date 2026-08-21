@@ -49,7 +49,10 @@ enum TopRanker {
             let isTracked = normalizedTrackedNames.contains(
                 sample.identity.name.lowercased()
             )
-            guard includeAllProcesses || isTracked || !ranks.isEmpty else {
+            let shouldInclude = normalizedTrackedNames.isEmpty
+                ? (includeAllProcesses || !ranks.isEmpty)
+                : isTracked
+            guard shouldInclude else {
                 return nil
             }
             return RankedProcessSample(sample: sample, ranks: ranks)
