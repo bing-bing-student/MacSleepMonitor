@@ -117,7 +117,8 @@ mkdir -p "${INSTALL_DIR}" "${OUTPUT_ROOT}"
 install -o root -g wheel -m 755 "${SOURCE_BINARY}" "${BINARY_PATH}"
 OUTPUT_ROOT_XML="$(xml_escape "${OUTPUT_ROOT}")"
 PROCESS_ARGUMENTS_XML=""
-for process_name in "${PROCESS_NAMES[@]}"; do
+# 兼容 macOS Bash 3.2：set -u 下的空数组需要条件展开。
+for process_name in ${PROCESS_NAMES[@]+"${PROCESS_NAMES[@]}"}; do
   process_name_xml="$(xml_escape "${process_name}")"
   PROCESS_ARGUMENTS_XML+="    <string>--process</string>"$'\n'
   PROCESS_ARGUMENTS_XML+="    <string>${process_name_xml}</string>"$'\n'

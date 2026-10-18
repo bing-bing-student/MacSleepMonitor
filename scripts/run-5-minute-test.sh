@@ -67,13 +67,14 @@ fi
 mkdir -p "${RUN_DIR}"
 
 echo "开始采集 5 分钟，输出目录：${RUN_DIR}"
+# 兼容 macOS Bash 3.2：set -u 下的空数组需要条件展开。
 sudo "${BINARY}" collect \
   --duration 300 \
   --interval 1 \
   --top 10 \
   --database "${RUN_DIR}/monitor.sqlite" \
   --csv-directory "${RUN_DIR}/csv" \
-  "${PROCESS_ARGS[@]}"
+  ${PROCESS_ARGS[@]+"${PROCESS_ARGS[@]}"}
 
 echo "生成 HTML 报告..."
 sudo "${BINARY}" report \
